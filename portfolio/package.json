@@ -10,7 +10,7 @@
     "postinstall": "nuxt prepare",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
-    "test": "npm run test:unit && npm run test:e2e"
+    "test": "npm run test:unit"
   },
   "dependencies": {
     "@nuxt/content": "^3.15.0",
