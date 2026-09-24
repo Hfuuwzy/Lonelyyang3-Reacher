@@ -298,7 +298,6 @@ Tailwind 可用于基础工具类，但当前视觉系统以 CSS variables 和 s
 | 债务 | 证据/影响 | 建议 |
 |---|---|---|
 | 旧布局与卡片组件仍在仓库 | `Header.vue`、`Sidebar.vue`、`HeroSection.vue`、`AboutSection.vue`、`CategoryGrid.vue`、`LatestPosts.vue`、`ContentCard.vue`、`TagBadge.vue` | 确认无引用后集中删除，并跑完整测试/构建。 |
-| locale 文件重复 | `app/locales/` 未被当前 i18n 配置引用；活跃目录是 `i18n/locales/` | 对比内容后删除旧副本。 |
 | 搜索每次输入读取完整集合 | `SearchBar.vue` | 缓存集合、debounce，或构建轻量索引。 |
 | 主题状态分散 | `theme.client.ts` 与 `ThemeToggle.vue` 都直接操作 DOM/localStorage | 提取 `useTheme()` composable。 |
 | RSS 链接没有实现 | `Footer.vue` 指向 `/atom.xml`，未找到生成逻辑 | 实现 Content feed 或暂时移除链接。 |
