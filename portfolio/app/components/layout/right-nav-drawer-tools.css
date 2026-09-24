@@ -1,0 +1,75 @@
+.drawer-tools {
+  display: grid;
+  gap: 12px;
+  padding-block: 24px;
+  border-block-start: 1px solid var(--rule);
+}
+
+.drawer-search-toggle {
+  display: inline-flex;
+  min-block-size: 44px;
+  align-items: center;
+  gap: 8px;
+  justify-self: start;
+  padding: 8px 12px;
+  border: 1px solid var(--rule);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+}
+
+.drawer-search-toggle:hover {
+  background: var(--sakura);
+  color: var(--vermilion);
+}
+
+.drawer-search-toggle:focus-visible {
+  outline: 3px solid var(--vermilion);
+  outline-offset: 3px;
+}
+
+.drawer-tool-icon {
+  inline-size: 20px;
+  block-size: 20px;
+  flex: 0 0 20px;
+}
+
+.drawer-search-panel {
+  position: relative;
+  z-index: 2;
+  transform-origin: top center;
+}
+
+.drawer-tools__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.drawer-search-panel-enter-active,
+.drawer-search-panel-leave-active {
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.drawer-search-panel-enter-from,
+.drawer-search-panel-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+@media (width < 768px) {
+  .drawer-tools__row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drawer-search-panel-enter-active,
+  .drawer-search-panel-leave-active {
+    transition-duration: 1ms;
+  }
+}

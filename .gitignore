@@ -1,0 +1,54 @@
+# Nuxt / Node build outputs
+node_modules
+.data
+.nuxt
+.output
+.nitro
+.cache
+dist
+
+# Logs
+logs
+*.log
+
+# Tests and reports
+coverage
+test-results
+playwright-report
+
+# Local env files
+.env
+.env.*
+!.env.example
+
+# Editor / OS files
+.idea
+.vscode
+.fleet
+*.suo
+*.swp
+.DS_Store
+
+# Local working notes
+*.local.md
+*.local.json
+ULTRAWORK-NOTEPAD.md
+.debug-journal.md
+
+# Root local agent infrastructure (kept on this machine, never in the repo)
+/.opencode/
+/.omo/
+/.codegraph/
+/.playwright-mcp/
+
+# Retired root artifacts (prevent accidental reintroduction)
+/package-lock.json
+/deaimon-assets.json
+/deaimon-snapshot.md
+/deaimon-drawer-live.png
+/deaimon-menu-expanded.png
+/deaimon-reference-desktop.png
+/task-4-desktop.png
+/task-4-mobile.png
+/task-4-tablet.png
+/docs/superpowers/

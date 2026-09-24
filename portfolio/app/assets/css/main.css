@@ -1,0 +1,166 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --paper: #f8f5ed;
+  --paper-warm: #fffaf0;
+  --ink: #2a0c00;
+  --ink-soft: #6f5748;
+  --vermilion: #e85845;
+  --sakura: #efcbd5;
+  --matcha: #dce8c8;
+  --wagashi: #ead8ad;
+  --rule: rgba(42, 12, 0, 0.34);
+  --nav-paper: rgba(250, 248, 242, 0.97);
+  --rail-width: 80px;
+  --rail-width-tablet: 64px;
+  --rail-width-mobile: 56px;
+  --right-rail-width-desktop: 80px;
+  --right-rail-width-tablet: 64px;
+  --right-rail-width-mobile: 56px;
+  --right-drawer-width-desktop: min(690px, calc(100vw - var(--right-rail-width-desktop)));
+  --home-info-track: 575fr;
+  --home-artwork-track: 1211fr;
+  --home-track-gap: clamp(24px, 2.05vw, 39px);
+  --home-brand-padding-block-start: 162px;
+  --home-artwork-intrinsic-width: 1920;
+  --home-artwork-intrinsic-height: 2566;
+  --home-artwork-intrinsic-ratio: 2566 / 1920;
+  --home-intro-logo-start-at: 500ms;
+  --home-intro-loading-piece-duration: 900ms;
+  --home-intro-loading-piece-blur: 10px;
+  --home-intro-loading-piece-offset: -12px;
+  --home-intro-loading-list-exit-duration: 2000ms;
+  --home-intro-loading-list-exit-blur: 20px;
+  --home-intro-loading-logo-block-size: min(80dvh, 1000px);
+  --home-intro-brand-visible-at: 5900ms;
+  --home-brand-max-inline-desktop: 680px;
+  --home-brand-max-inline-tablet: 640px;
+  --home-brand-max-inline-mobile: 100%;
+--home-brand-secondary-source-width: 1829;
+--home-brand-secondary-source-height: 860;
+--home-brand-secondary-crop-height: 516;
+  --home-brand-secondary-inline-desktop: 72%;
+  --home-brand-secondary-inline-tablet: 78%;
+  --home-brand-secondary-inline-mobile: 88%;
+  --home-brand-stack-gap: clamp(10px, 1vw, 18px);
+  --home-brand-theme-invert: 0;
+  --home-brand-theme-hue: 0deg;
+  --home-intro-artwork-start-edge: 50dvh;
+  --home-intro-artwork-entry-blur: 32px;
+  --home-intro-artwork-reveal-at: 3800ms;
+  --home-intro-artwork-drop-start: 4400ms;
+  --home-intro-artwork-drop-duration: 2000ms;
+  --home-intro-artwork-drop-ease: cubic-bezier(.4, 0, .8, 1);
+  --home-intro-handoff-at: 5900ms;
+  --home-intro-overlay-exit-duration: 2000ms;
+  --home-intro-overlay-exit-ease: cubic-bezier(.83, 0, .17, 1);
+  --home-intro-settled-at: 7900ms;
+  --home-motion-reduced: 1ms;
+  --home-paper-depth-desktop: 66px;
+  --home-paper-depth-tablet: 52px;
+  --home-paper-depth-mobile: 40px;
+  --home-paper-diagonal: clamp(18px, 2vw, 32px);
+  --font-mincho: "YakuHanMP", "Noto Serif JP", "Yu Mincho", "YuMincho", "Hiragino Mincho ProN", "Noto Serif SC", "Songti SC", "STSong", "SimSun", serif;
+  --drawer-transition-duration: 700ms;
+  --paper-texture: url('/images/reference/deaimon/paper-body.jpg');
+  --home-watercolor-blue: #dbe8ea;
+  --home-watercolor:
+    radial-gradient(circle at 4% 2%, color-mix(in srgb, var(--vermilion) 44%, transparent) 0%, transparent 34%),
+    radial-gradient(circle at 20% 14%, color-mix(in srgb, var(--sakura) 72%, transparent) 0%, transparent 42%),
+    radial-gradient(circle at 50% 48%, color-mix(in srgb, var(--wagashi) 56%, transparent) 0%, transparent 46%),
+    radial-gradient(circle at 28% 78%, color-mix(in srgb, var(--matcha) 62%, transparent) 0%, transparent 48%),
+    radial-gradient(circle at 76% 92%, color-mix(in srgb, var(--home-watercolor-blue) 50%, transparent) 0%, transparent 52%),
+    var(--paper-texture);
+  --paper-surface-depth:
+    linear-gradient(color-mix(in srgb, var(--paper) 82%, transparent), color-mix(in srgb, var(--paper) 82%, transparent)),
+    var(--paper-texture);
+  --paper-surface-blend: normal, multiply;
+  --ink-impression: 0 0.35px 0 color-mix(in srgb, var(--ink) 18%, transparent);
+  --section-paper-texture: url('/images/reference/deaimon/paper-section.jpg');
+  --nav-paper-texture: url('/images/reference/deaimon/paper-nav.jpg');
+  --petal-01: url('/images/reference/deaimon/petal-01.png');
+  --petal-03: url('/images/reference/deaimon/petal-03.png');
+  --petal-07: url('/images/reference/deaimon/petal-07.png');
+  --color-bg: var(--paper);
+  --color-surface: var(--paper-warm);
+  --color-text: var(--ink);
+  --color-text-secondary: var(--ink-soft);
+  --color-border: var(--rule);
+}
+
+:root.dark {
+  --paper: #171b22;
+  --paper-warm: #20232b;
+  --ink: #f2eadb;
+  --ink-soft: #c6b9a8;
+  --vermilion: #ef7867;
+  --sakura: #5d404b;
+  --matcha: #3f4c3c;
+  --wagashi: #564b35;
+  --rule: rgba(242, 234, 219, 0.34);
+  --nav-paper: rgba(23, 27, 34, 0.97);
+  --home-brand-theme-invert: 1;
+  --home-brand-theme-hue: 180deg;
+  --color-bg: var(--paper);
+  --color-surface: var(--paper-warm);
+  --color-text: var(--ink);
+  --color-text-secondary: var(--ink-soft);
+  --color-border: var(--rule);
+}
+
+@layer base {
+  html {
+    overflow-y: scroll;
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-bg text-text font-serif;
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+
+  ::selection {
+    background-color: var(--sakura);
+    color: var(--vermilion);
+  }
+}
+
+.about-page__role {
+  white-space: nowrap;
+}
+
+@media (min-width: 1024px) {
+  :where(.about-page, .blog-index) {
+    background-color: var(--paper);
+    background-image: var(--paper-surface-depth);
+    background-blend-mode: var(--paper-surface-blend);
+    text-shadow: var(--ink-impression);
+  }
+}
+
+@media (width < 1024px) {
+  :root {
+    --right-drawer-width-desktop: min(690px, calc(100vw - var(--right-rail-width-tablet)));
+  }
+}
+
+@media (width < 768px) {
+  :root {
+    --right-drawer-width-desktop: min(690px, calc(100vw - var(--right-rail-width-mobile)));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: var(--home-motion-reduced) !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: var(--home-motion-reduced) !important;
+  }
+}

@@ -1,0 +1,118 @@
+.article-prose {
+  max-inline-size: 760px;
+  color: var(--ink);
+  font-family: "Noto Serif SC", "Noto Serif JP", "Songti SC", serif;
+  font-size: 17px;
+  line-height: 1.8;
+}
+
+.article-prose :deep(h1:first-child) {
+  display: none;
+}
+
+.article-prose :deep(h2),
+.article-prose :deep(h3),
+.article-prose :deep(h4) {
+  color: var(--ink);
+  font-weight: 600;
+  line-height: 1.4;
+  text-wrap: balance;
+}
+
+.article-prose :deep(h2) {
+  margin: 56px 0 20px;
+  padding-block-end: 12px;
+  border-block-end: 1px dotted var(--rule);
+  font-size: 32px;
+}
+
+.article-prose :deep(h3) {
+  margin: 40px 0 16px;
+  font-size: 24px;
+}
+
+.article-prose :deep(h4) {
+  margin: 32px 0 12px;
+  font-size: 20px;
+}
+
+.article-prose :deep(p) {
+  margin: 0 0 24px;
+}
+
+.article-prose :deep(a) {
+  color: var(--vermilion);
+  text-decoration-color: var(--rule);
+  text-underline-offset: 4px;
+}
+
+.article-prose :deep(a:focus-visible) {
+  outline: 3px solid var(--vermilion);
+  outline-offset: 4px;
+}
+
+.article-prose :deep(blockquote) {
+  margin: 32px 0;
+  padding: 16px 24px;
+  border-inline-start: 4px solid var(--vermilion);
+  background: var(--paper-warm);
+  color: var(--ink-soft);
+}
+
+.article-prose :deep(code) {
+  padding: 2px 4px;
+  background: var(--paper-warm);
+  color: var(--ink);
+  font-size: 0.9em;
+}
+
+.article-prose :deep(pre) {
+  max-inline-size: 100%;
+  margin: 32px 0;
+  overflow-x: auto;
+  border: 1px solid var(--rule);
+  background: var(--paper-warm);
+  padding: 20px;
+}
+
+.article-prose :deep(pre code) {
+  padding: 0;
+  background: transparent;
+}
+
+.article-prose :deep(img) {
+  display: block;
+  inline-size: min(100%, 720px);
+  block-size: auto;
+  margin: 32px auto;
+}
+
+.article-prose :deep(table) {
+  inline-size: 100%;
+  margin: 32px 0;
+  border-collapse: collapse;
+  font-size: 15px;
+}
+
+.article-prose :deep(th),
+.article-prose :deep(td) {
+  border: 1px solid var(--rule);
+  padding: 12px 16px;
+  text-align: start;
+}
+
+.article-prose :deep(th) {
+  background: var(--paper-warm);
+}
+
+@media (max-width: 767px) {
+  .article-prose {
+    font-size: 16px;
+    line-height: 1.75;
+  }
+
+  .article-prose :deep(table) {
+    display: block;
+    overflow-x: auto;
+  }
+}

@@ -1,0 +1,126 @@
+.blog-detail {
+  display: grid;
+  gap: 48px;
+  max-inline-size: 960px;
+  padding: 64px clamp(32px, 8vw, 96px);
+}
+
+.blog-detail__header {
+  display: grid;
+  gap: 24px;
+}
+
+.blog-detail__title {
+  margin: 0;
+  color: var(--ink);
+  font-family: "Noto Serif SC", "Noto Serif JP", "Songti SC", serif;
+  font-size: clamp(32px, 5vw, 48px);
+  line-height: 1.3;
+  text-wrap: balance;
+}
+
+.blog-detail__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding-block-end: 16px;
+  border-block-end: 1px dotted var(--rule);
+  color: var(--ink-soft);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+
+.blog-detail__description {
+  max-inline-size: 760px;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 17px;
+  line-height: 1.8;
+}
+
+.blog-detail__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  color: var(--vermilion);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  list-style: none;
+}
+
+.blog-detail__tags li {
+  padding: 4px 8px;
+  border: 1px solid var(--vermilion);
+}
+
+.blog-detail__cover {
+  inline-size: min(100%, 760px);
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+
+.blog-detail__navigation {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  max-inline-size: 760px;
+  padding-block-start: 32px;
+  border-block-start: 1px dotted var(--rule);
+}
+
+.blog-detail__surrounding,
+.blog-detail__back {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.blog-detail__surrounding {
+  display: grid;
+  gap: 8px;
+  padding-block: 16px;
+}
+
+.blog-detail__surrounding--next {
+  text-align: end;
+}
+
+.blog-detail__surrounding > span {
+  color: var(--ink-soft);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+
+.blog-detail__surrounding:hover,
+.blog-detail__back:hover {
+  color: var(--vermilion);
+}
+
+.blog-detail__surrounding:focus-visible,
+.blog-detail__back:focus-visible {
+  outline: 3px solid var(--vermilion);
+  outline-offset: 4px;
+}
+
+.blog-detail__back {
+  grid-column: 1 / -1;
+  justify-self: start;
+  padding-block: 12px;
+  border-block-end: 2px solid var(--vermilion);
+}
+
+@media (max-width: 767px) {
+  .blog-detail {
+    gap: 32px;
+    padding: 32px 24px;
+  }
+
+  .blog-detail__navigation {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .blog-detail__surrounding--next {
+    text-align: start;
+  }
+}

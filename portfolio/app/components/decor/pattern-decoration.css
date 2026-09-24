@@ -1,0 +1,39 @@
+.pattern-decoration,
+.pattern-decoration__layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.pattern-decoration {
+  overflow: hidden;
+  opacity: 0.72;
+}
+
+.pattern-decoration__layer--one {
+  background-image:
+    linear-gradient(30deg, var(--sakura) 12%, transparent 12.5%, transparent 87%, var(--sakura) 87.5%),
+    linear-gradient(150deg, var(--sakura) 12%, transparent 12.5%, transparent 87%, var(--sakura) 87.5%);
+  background-size: 48px 80px;
+}
+
+.pattern-decoration__layer--two {
+  background: radial-gradient(circle at 75% 25%, var(--wagashi), transparent 40%);
+  opacity: 0.48;
+}
+
+.pattern-decoration--checker .pattern-decoration__layer--one {
+  background-image:
+    linear-gradient(45deg, var(--matcha) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--matcha) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--wagashi) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--wagashi) 75%);
+  background-position: 0 0, 0 24px, 24px -24px, -24px 0;
+  background-size: 48px 48px;
+}
+
+.pattern-decoration--wash .pattern-decoration__layer--one {
+  background:
+    radial-gradient(circle at 20% 35%, var(--sakura), transparent 36%),
+    radial-gradient(circle at 80% 70%, var(--matcha), transparent 40%);
+}

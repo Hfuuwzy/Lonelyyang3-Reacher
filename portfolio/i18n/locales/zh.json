@@ -1,0 +1,35 @@
+{
+  "site": {
+    "title": "MyWorks",
+    "description": "个人专属门户"
+  },
+  "nav": {
+    "home": "首页",
+    "blog": "博客",
+    "projects": "开源作品",
+    "movies": "电影推荐",
+    "anime": "动漫推荐",
+    "music": "音乐推荐",
+    "tools": "工具资源",
+    "life": "生活随笔",
+    "notes": "技术笔记",
+    "about": "关于我"
+  },
+  "home": {
+    "welcome": "欢迎来到我的个人门户",
+    "subtitle": "这里记录了我的技术学习、开源项目、生活感悟和各种推荐内容。希望这些内容能对你有所帮助。",
+    "viewAll": "查看全部"
+  },
+  "drawer": {
+    "tools": "站点工具",
+    "search": "搜索",
+    "searchPlaceholder": "搜索文章...",
+    "language": "语言",
+    "currentLocale": "当前",
+    "theme": "主题"
+  },
+  "footer": {
+    "copyright": "版权所有",
+    "builtWith": "使用 Nuxt.js 和 Tailwind CSS 构建"
+  }
+}
