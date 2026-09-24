@@ -1,5 +1,7 @@
 # Asset Sources
 
+This document covers the user-provided source files under `reference/asset-sources/` and their documented runtime derivatives only. Webpages load local runtime files from `public/images/` via `/images/...`; they do not directly load files from `reference/asset-sources/`. This is not an inventory of every file under `public/`.
+
 ## Homepage hero asset
 
 | Source | Source properties | Runtime derivative | Use |
@@ -15,7 +17,7 @@ The hero source is user-provided/generated and copied without resizing or re-enc
 | `reference/asset-sources/logo.png` | `2048×682`; transparent RGBA | `public/images/brand/lonelyyang3-wordmark.png`; byte-for-byte copy at unchanged `2048×682` | Main homepage brush wordmark |
 | `reference/asset-sources/bdinfo.png` | `1829×860`; transparent RGBA | `public/images/brand/lonelyyang3-myself-world.png`; byte-for-byte copy at unchanged `1829×860` | Secondary bilingual brand artwork |
 
-Both source images are user-provided/generated, and their rights and provenance were supplied by the user. They remain preserved and untouched. `scripts/generate-brand-assets.mjs` validates their PNG format, RGBA channels, dimensions, visible pixels, and transparent pixels, then copies the encoded bytes unchanged to the runtime paths. Generate or verify with:
+For these two listed source images, the user supplied the rights and provenance information; they remain preserved and untouched. `scripts/generate-brand-assets.mjs` validates their PNG format, RGBA channels, dimensions, visible pixels, and transparent pixels, then copies the encoded bytes unchanged to the runtime paths. Generate or verify with:
 
 ```text
 node scripts/generate-brand-assets.mjs
@@ -24,7 +26,7 @@ node scripts/generate-brand-assets.mjs --check
 
 No matte removal or re-encoding is applied. This preserves the supplied alpha channel, colors, antialiased brush edges, and encoded PNG bytes exactly; `--check` also requires each runtime file to be byte-identical to its source.
 
-No per-slice, cropped, dark-theme, or other raster variants may be created, except for the user-supplied homepage loading pieces below and their deterministic runtime derivatives. Slicing and the secondary crop remain CSS-only. No reference-site Logo, image, or other proprietary asset is copied, downloaded, or hotlinked.
+No per-slice, cropped, dark-theme, or other raster variants may be created, except for the user-supplied homepage loading pieces below and their deterministic runtime derivatives. Slicing and the secondary crop remain CSS-only. No reference-site logo, image, or other proprietary asset is used as a source for the user-provided assets documented in this file or their derivatives.
 
 ## Homepage loading intro and site icon
 
@@ -47,4 +49,4 @@ node scripts/generate-home-intro-assets.mjs
 
 The separate `reference/asset-sources/图标.png` source retains its transparent-generation path: bright neutral matte pixels are cleared first; remaining near-white edge pixels use `distance = max(255-r, 255-g, 255-b)` to receive linearly scaled alpha and per-channel white unmatting, while clearly non-white foreground pixels retain their original RGB and full opacity. Its encoded `public/images/brand/site-icon.png` derivative uses compression level 9, adaptive filtering, no palette, and non-progressive output.
 
-All six source files are user-owned and remain untouched. No `deaimon.jp` image bytes are copied or hotlinked; the runtime files come solely from these user-supplied inputs.
+The six source files in the homepage loading intro and site icon section are user-owned and remain untouched. This document describes only those listed sources and their documented derivatives; the separate [`public/images/reference/deaimon/ASSET-SOURCES.md`](public/images/reference/deaimon/ASSET-SOURCES.md) records the local development-preview placeholders in that directory and their source URL metadata.
