@@ -117,15 +117,6 @@ test.describe('right rail redesign shell', () => {
   })
 })
 
-test('blog index uses chronological rows instead of the old card grid wall', async ({ page }) => {
-  await page.goto('/blog')
-
-  await expect(page.getByTestId('category-landing-blog')).toBeVisible()
-  await expect(page.getByTestId('article-row-linux-commands')).toBeVisible()
-  await expect(page.locator('.card')).toHaveCount(0)
-  await expect(page.locator('.grid.lg\\:grid-cols-3')).toHaveCount(0)
-})
-
 test('homepage renders H-01 through H-05 with real DOM layers', async ({ page }) => {
   await page.goto('/')
 

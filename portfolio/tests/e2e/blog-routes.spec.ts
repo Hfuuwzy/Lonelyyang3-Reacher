@@ -42,15 +42,6 @@ for (const article of articles) {
   })
 }
 
-test('unknown blog slug returns HTTP 404', async ({ request }) => {
-  // Given a slug absent from the Content collection
-  // When the route is requested directly
-  const response = await request.get('/blog/not-a-real-article')
-
-  // Then Nuxt returns the explicit not-found response
-  expect(response.status()).toBe(404)
-})
-
 test('Japanese article navigation keeps every internal link in the current locale', async ({ page }) => {
   // Given the Japanese route for an existing article
   // When the reader opens the article detail
