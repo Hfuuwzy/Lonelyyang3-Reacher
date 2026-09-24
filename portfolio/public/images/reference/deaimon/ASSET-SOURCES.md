@@ -2,6 +2,8 @@
 
 These assets are development-preview placeholders for the MyWorks redesign. They are not production-ready ownership-cleared assets.
 
+The URLs below are source metadata for the corresponding local temporary preview assets in this directory. They are not page hotlinks. Webpages load local runtime files from `public/images/` via `/images/...`; `reference/asset-sources/` contains source inputs and is not directly loaded by pages. These temporary assets are not rights-cleared, are development-only, and must be replaced or recreated with assets cleared for use before production.
+
 | File | Source | Page Use | Replacement Status |
 |---|---|---|---|
 | `cover-mysql.jpg` | `https://deaimon.jp/core_sys/images/contents/00000032/block/00000061/00000097.jpg?1661764396` | Temporary MySQL article cover | Replace before production素材 readiness |
