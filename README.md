@@ -25,15 +25,23 @@ npm install        # install dependencies (postinstall runs nuxt prepare)
 npm run dev        # start the dev server
 npm run build      # production build
 npm run test:unit  # unit tests (vitest)
-npm run test:e2e   # End-to-end tests (Playwright)
-npm test           # unit then E2E
+npm test           # unit tests only
 ```
+
+Playwright E2E is opt-in. Run only when requested and target the spec or cases related to the changed behavior:
+
+```powershell
+npm run test:e2e -- tests/e2e/final-qa.spec.ts
+npm run test:e2e -- tests/e2e/final-qa.spec.ts --grep "Japanese routes"
+```
+
+An unfiltered `npm run test:e2e` runs the full suite; use it only when the full E2E suite is explicitly requested.
 
 There is no standalone `typecheck` script configured for `portfolio/`; `npm run dev` and `npm run build` are the available local commands.
 
-### E2E baseline (issue #2)
+### Recorded E2E baseline (issue #2)
 
-The current E2E run settles at **40 passing, 11 accepted failures**. The 11 failures are accepted stale-contract failures (page structure/behavior drifted from older test expectations) and do not block the baseline.
+At issue #2 closure, the recorded E2E baseline was **40 passing, 11 accepted failures**. The 11 failures were stale page-structure/behavior contracts and were accepted for that baseline; they are historical context, not a requirement to run E2E for every change.
 
 ## Local agent infrastructure
 

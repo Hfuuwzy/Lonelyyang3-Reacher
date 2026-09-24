@@ -3,11 +3,18 @@
 ## Repository layout
 
 - Git root: this directory (`D:\Code\Blog`).
-- Frontend app: `portfolio/` (Nuxt 4). It is the npm working directory — run every npm command from `portfolio/` (`npm install`, `npm run dev`, `npm run build`, `npm run test:unit`, `npm run test:e2e`). There is no root npm workspace and no standalone typecheck script.
+- Frontend app: `portfolio/` (Nuxt 4). It is the npm working directory — run every npm command from `portfolio/` (`npm install`, `npm run dev`, `npm run build`, `npm test`, `npm run test:unit`, `npm run test:e2e`). There is no root npm workspace and no standalone typecheck script.
 - Planned sibling: `backend/`.
 - Governance docs: `README.md`, `CONTEXT.md`, `docs/adr/`, `docs/agents/`, `docs/browser-automation-runbook.md`.
 - Machine-local agent tooling (`.opencode/`, `.omo/`, `.codegraph/`, `.playwright-mcp/`) is ignored by `.gitignore` and never committed.
 - Keep root-level screenshots, browser captures, and retired plans/specs out of the repo; keep the frontend lockfile under `portfolio/`.
+
+## Test execution
+
+- Choose the smallest relevant checks for changed behavior; tests are not a mandatory end-of-task ritual.
+- `npm test` and `npm run test:unit` run unit tests only.
+- Playwright E2E is opt-in: run it only when the user explicitly asks for E2E/Playwright tests. When requested, select only affected spec files or cases with a path or title filter; run the unfiltered full suite only when the user explicitly asks for the full E2E suite.
+- Add or update focused tests when a behavior needs a maintained regression guard. Keep distinct useful coverage; retire or consolidate cases only when the behavior is removed or coverage is genuinely redundant, not merely because a test passed once.
 
 ## Browser Automation
 
