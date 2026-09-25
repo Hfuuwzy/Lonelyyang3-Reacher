@@ -18,7 +18,7 @@
           spellcheck="false"
           :placeholder="baseUrlPlaceholder"
         />
-        <p class="prototype-provider-form__hint">按提供方文档填写；/v1 可能是也可能不是 base URL 的一部分，原样输入，不做路径归一化。</p>
+        <p class="prototype-provider-form__hint">按提供方文档原样复制，不做路径归一化；/v1 是否在路径中因提供方而异。</p>
       </div>
 
       <div class="prototype-provider-form__field">
@@ -65,7 +65,9 @@
 </template>
 
 <script lang="ts">
-export type ApiProtocol = 'openai-completions' | 'openai-responses' | 'anthropic-messages'
+import { API_PROTOCOLS, type ApiProtocol } from './api-settings-config'
+
+export type { ApiProtocol }
 
 export interface ProtocolOption {
   readonly value: ApiProtocol
@@ -73,12 +75,11 @@ export interface ProtocolOption {
 }
 
 export const OPENAI_PROTOCOLS: readonly ProtocolOption[] = [
-  { value: 'openai-completions', label: 'OpenAI Completions' },
-  { value: 'openai-responses', label: 'OpenAI Responses' },
+  { value: API_PROTOCOLS.openaiCompletions, label: 'OpenAI Chat Completions' },
 ]
 
 export const ANTHROPIC_PROTOCOLS: readonly ProtocolOption[] = [
-  { value: 'anthropic-messages', label: 'Anthropic Messages' },
+  { value: API_PROTOCOLS.anthropicMessages, label: 'Anthropic Messages' },
 ]
 </script>
 
