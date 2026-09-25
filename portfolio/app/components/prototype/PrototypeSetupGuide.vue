@@ -21,7 +21,7 @@
         模型如 <code>{{ anthropicModels.join('、') }}</code>。其他提供方的 Base URL 各不相同，请照抄你自己提供方文档里的地址。
       </p>
       <p class="prototype-setup-guide__item">
-        <strong>密钥与费用</strong>：API 密钥由你自己提供并保管，调用费用由你直接向提供方支付。
+        <strong>密钥与费用</strong>：API 密钥由你自己提供并保管，调用费用由你直接向提供方支付。实际费率与计费规则由提供方制定，启用前请先查阅提供方当前的定价。
       </p>
       <p class="prototype-setup-guide__item">
         <strong>数据去向</strong>：配置后，请求可能把相关内容发送给你配置的提供方。本原型为纯演示——不发起任何请求、不保存任何密钥，请勿输入真实密钥。
