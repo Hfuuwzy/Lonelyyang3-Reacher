@@ -64,4 +64,25 @@ export default defineNuxtConfig({
     '/blog': { swr: 3600 },
     '/projects/**': { swr: 3600 },
   },
+
+  hooks: {
+    'pages:extend'(pages) {
+      if (process.env.NODE_ENV !== 'production') {
+        return
+      }
+
+      const prototypePages = pages.filter((page) => {
+        const path = page.path ?? ''
+        const file = (page.file ?? '').replace(/\\/g, '/')
+        return path.startsWith('/prototype/') || /\/prototype\//.test(file)
+      })
+
+      for (const page of prototypePages) {
+        const index = pages.indexOf(page)
+        if (index >= 0) {
+          pages.splice(index, 1)
+        }
+      }
+    },
+  },
 })
