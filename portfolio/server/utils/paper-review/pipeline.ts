@@ -60,6 +60,7 @@ const HARNESS_MESSAGES: Record<string, string> = {
   'version-mismatch': '本地的 Harness CLI 版本与应用 SDK 不一致，请重新构建后重试。',
   'cli-not-built': '本地的 Harness CLI 尚未构建，请先构建后再试。',
   'run-failed': '模型服务暂不可用，请稍后重试。',
+  'cleanup-failed': '审阅进程清理失败，临时环境可能残留，请稍后重试。',
 }
 
 const VERIFY_MESSAGES: Record<string, string> = {

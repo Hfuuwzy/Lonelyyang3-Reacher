@@ -226,6 +226,28 @@ describe('createPaperReviewEvents failure paths', () => {
     expect(verify).not.toHaveBeenCalled()
   })
 
+  it('maps a cleanup-failed analyzing result to a safe terminal error and never verifies', async () => {
+    // Given a runner whose cleanup close fails carrying a credential-like detail.
+    const extract = vi.fn(async (): Promise<PaperExtractionSuccess> => ({ success: true, pageCount: 1, pages: FAKE_PAGES }))
+    const run = vi.fn(async (): Promise<PaperReviewHarnessFailure> => ({ success: false, error: { code: 'cleanup-failed', message: 'SDK cleanup nearby sk-secret-close', recoverable: true } }))
+    const verify = vi.fn()
+
+    // When the model run reports a cleanup failure.
+    const events = await consume(createPaperReviewEvents(validParts(), { extractPaperPages: extract, runPaperReview: run, verifyPaperReview: verify }))
+
+    // Then the stream ends at the analyzing stage with an actionable safe error.
+    expect(stagesOf(events)).toEqual(['validating', 'extracting', 'analyzing'])
+    const terminal = lastEvent(events)
+    expect(terminal.type).toBe('error')
+    if (terminal.type === 'error') {
+      expect(terminal.stage).toBe('analyzing')
+      expect(terminal.code).toBe('cleanup-failed')
+      expect(terminal.message).toBe('审阅进程清理失败，临时环境可能残留，请稍后重试。')
+      expect(terminal.message).not.toContain('sk-secret-close')
+    }
+    expect(verify).not.toHaveBeenCalled()
+  })
+
   it('stops at a verifying failure and never emits a report', async () => {
     // Given: a verifier that rejects the raw response.
     const { extract, run } = successDeps()
