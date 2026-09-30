@@ -43,6 +43,11 @@ export type PaperReviewHarnessErrorCode =
   | 'version-mismatch'
   | 'cli-not-built'
   | 'run-failed'
+  | 'cleanup-failed'
+
+/** Fixed, safe, actionable text for a cleanup failure; never carries SDK detail. */
+export const CLEANUP_FAILED_MESSAGE =
+  'The review session cleanup failed; the temporary environment may be incomplete. Please try again later.'
 
 export interface PaperReviewHarnessError {
   readonly code: PaperReviewHarnessErrorCode
@@ -174,7 +179,9 @@ export async function runPaperReview(
   }
   const tempRoot = createTempRoot()
   let harness: HarnessLike | undefined
+  let cleanupFailed = false
 
+  let result: PaperReviewHarnessResult
   try {
     const patchPath = join(tempRoot, 'overlay.cordis.yml')
     writeFileSync(patchPath, buildOverlayPatch(parsed.data))
@@ -197,24 +204,25 @@ export async function runPaperReview(
       pages,
     })
     // No session id: the SDK mints one fresh session per invocation.
-    const result = await harness.run(prompt)
-    return { success: true, finalResponse: result.finalResponse }
+    const runResult = await harness.run(prompt)
+    result = { success: true, finalResponse: runResult.finalResponse }
   } catch (error) {
-    return { success: false, error: toHarnessError(error) }
+    result = { success: false, error: toHarnessError(error) }
   } finally {
-    // Close is part of cleanup; harvest a close failure to surface after the
-    // temp tree is removed, so a close throw never skips the removal.
-    let closeError: unknown = undefined
+    // Close is part of cleanup; harvest a close failure so the temp tree is
+    // removed no matter what, then return a typed cleanup-failed failure.
     if (harness !== undefined) {
       try {
         await harness.close()
-      } catch (error) {
-        closeError = error
+      } catch {
+        cleanupFailed = true
       }
     }
     rmSync(tempRoot, { recursive: true, force: true })
-    if (closeError !== undefined) {
-      throw closeError
-    }
   }
+
+  if (cleanupFailed) {
+    return { success: false, error: { code: 'cleanup-failed', message: CLEANUP_FAILED_MESSAGE, recoverable: true } }
+  }
+  return result
 }

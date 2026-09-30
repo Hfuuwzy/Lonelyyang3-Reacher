@@ -310,6 +310,75 @@ describe('runPaperReview success and failure lifecycle', () => {
     expect(result.error.message).not.toContain(KEY)
   })
 
+  it('resolves to a typed key-free cleanup-failed result when close rejects after a successful run', async () => {
+    // Given a run that succeeds but whose close rejects with a key-bearing error.
+    const record = newRecord()
+    const closeError = new Error(`close blew up near ${KEY}`)
+    const factory: HarnessFactory = (options) => {
+      record.launches.push(options)
+      return {
+        async run() {
+          record.attempts += 1
+          return { sessionId: 'sess-1', finalResponse: '{ "sections": [] }' }
+        },
+        async close() {
+          record.closes += 1
+          throw closeError
+        },
+      }
+    }
+
+    // When the run completes and cleanup's close rejects.
+    const result = await runPaperReview(KNOWN_INPUT, PAGES, { harnessFactory: factory, resolveLocalDshBin: okResolver(FAKE_LOCAL_BIN) })
+
+    // Then it resolves as a typed cleanup-failed failure rather than throwing,
+    // never leaking the key or the raw close message, closing once, and removing
+    // the temp home.
+    expect(result.success).toBe(false)
+    if (result.success) {
+      return
+    }
+    expect(result.error.code).toBe('cleanup-failed')
+    expect(result.error.recoverable).toBe(true)
+    expect(result.error.message).not.toContain(KEY)
+    expect(result.error.message).not.toContain(closeError.message)
+    expect(record.closes).toBe(1)
+    expect(existsSync(record.launches[0]!.dshHome!)).toBe(false)
+  })
+
+  it('lets a close failure take precedence over a run failure, still typed and key-free', async () => {
+    // Given a run that rejects and a close that also rejects with a key-bearing error.
+    const record = newRecord()
+    const closeError = new Error(`close blew up near ${KEY}`)
+    const factory: HarnessFactory = (options) => {
+      record.launches.push(options)
+      return {
+        async run() {
+          record.attempts += 1
+          throw new Error('provider is unavailable')
+        },
+        async close() {
+          record.closes += 1
+          throw closeError
+        },
+      }
+    }
+
+    // When both the run and the close reject.
+    const result = await runPaperReview(KNOWN_INPUT, PAGES, { harnessFactory: factory, resolveLocalDshBin: okResolver(FAKE_LOCAL_BIN) })
+
+    // Then cleanup-failed wins over run-failed and the temp home is still removed.
+    expect(result.success).toBe(false)
+    if (result.success) {
+      return
+    }
+    expect(result.error.code).toBe('cleanup-failed')
+    expect(result.error.message).not.toContain(KEY)
+    expect(result.error.message).not.toContain(closeError.message)
+    expect(record.closes).toBe(1)
+    expect(existsSync(record.launches[0]!.dshHome!)).toBe(false)
+  })
+
   it('mints a fresh unique temp home per invocation and removes every home', async () => {
     // Given two sequential invocations sharing one capturing factory.
     const record = newRecord()
