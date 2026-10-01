@@ -9,6 +9,9 @@
  * `providerLabel`, `baseUrl`, `protocol`, `model`, `apiKey`.
  */
 
+import { createPaperReviewTaskResultSchema } from './paper-review-task-schema'
+import type { PaperReviewTaskResult } from './paper-review-task-contract'
+
 export const PAPER_REVIEW_STAGES = ['validating', 'extracting', 'analyzing', 'verifying'] as const
 export type PaperReviewStage = (typeof PAPER_REVIEW_STAGES)[number]
 
@@ -143,6 +146,17 @@ function isPaperReviewReport(value: unknown): value is PaperReviewReport {
     && value.gaps.every(isPaperReviewGap)
     && isPaperReviewMissingScope(value.missingScope)
   )
+}
+
+// Reuses the #27 pure guards above for report data, avoiding a module cycle.
+const paperReviewTaskResultSchema = createPaperReviewTaskResultSchema({
+  isPaperReviewSection,
+  isPaperReviewGap,
+})
+
+/** Validates the terminal application-derived task-result payload in-band. */
+export function isPaperReviewTaskResult(value: unknown): value is PaperReviewTaskResult {
+  return paperReviewTaskResultSchema.safeParse(value).success
 }
 
 /**
