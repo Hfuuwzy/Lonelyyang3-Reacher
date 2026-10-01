@@ -194,6 +194,17 @@
 - 代码块、引用、图片和标题均使用同一和纸/墨色体系。
 - 详情页底部提供上一篇、下一篇和返回分类。
 
+### 4.5.1 `deepseek-reader` 阅读原型（桌面 · 中文）
+
+- `/prototype/deepseek-reader` 是 DeepSeek 研究笔记的档案导读（B）桌面中文阅读原型。原 A/B/C 三布局变体已验收并选定 B，路由不再提供布局切换器、`variant` 查询参数或键盘切换状态，始终渲染 B（`PrototypeReaderGuided`）；旧的 `?variant=` 取值自然失效，不做兼容。仅验收桌面（≥1024px）与中文；移动端与日文不在本原型范围内，站内既有的移动端、日文规则保持不变。原型路由仍在 `nuxt.config.ts` 的生产 `pages:extend` 钩子中随其他 `/prototype/` 页面一并排除——该排除保持为有意为之，直到未来生产 `blog` 实现任务接管。
+- 居中规则：**文章正文栏**（不是 TOC 加正文的组合）的居中基准是 `.site-content` 扣除固定右轨 gutter 后的主内容区——即 `padding-inline-end: var(--rail-width)` 之后的内容盒，而非 `100vw`，也不是左对齐的 `max-width` 块。B 的 760px 正文栏以对称网格轨道（中间 `minmax(0, 760px)` + 两侧等宽 `1fr`）独立居中，粘性导读轨与正文栏的居中计算解耦。
+- B 的宽桌面（≥1600px）粘性导读轨位于对称网格左侧 `1fr` 轨道内、`justify-self: end` 右对齐，行内宽度 `260px`（观测值，容纳最长标签 “OpenAI、Anthropic 与自托管 route” 与 “DEEPSEEK_API_KEY 的适用范围”，使换行发生在自然分词处而非中文短语内部）。导读轨加宽只占用左 `1fr` 轨道，不改变中间 760px 正文栏轨道及其内容轴。`<1600px` 时导读轨退化为正文栏上方的横向章节条（`width: auto`、`justify-self: stretch`），正文栏仍独立居中、不位移。
+- B 的章节导航直接使用 Nuxt Content 生成的 `page.body.toc.links`：过滤 `depth === 2`，`href` 为 `#`+`link.id`、标签为 `link.text`；标题 id 由内容渲染器在 SSR 阶段产出，直接 hash 加载即可定位，不做 DOM 变更、不改写标题 id。
+- B 的档案头图沿用 C 档案卷首验收中衍生的 `ReaderDossierMasthead`：`研究备忘` 竖排朱印、`RESEARCH DOSSIER · 研究档案` 眉题、明体标题与 lede，下方为快照日期 / 分类 / 标签三条事实栏。
+- B 的正文采用页面级中文优先衬线/字重体系（依据 deaimon.jp 实测排版特征）：`Noto Serif SC → Noto Serif JP → 宋体/系统衬线`，正文 400（沿用既有 17px/1.8），`strong` 强调收敛为 600，章节标题显式 700；只作用于 B 原型内，不改全局 `article-prose` 规则与字体令牌。
+- 原型始终渲染 `PrototypeReaderGuided`（`ReaderGuided.vue`），共用同一篇 `research` 集合页面项，正文一律经 `ArticleProse`（Nuxt Content `ContentRenderer`）渲染；原型不编写 Markdown 解析器、不复制正文副本。原型样式 `scoped`，只叠加既有令牌（`--paper`、`--ink`、`--ink-soft`、`--rule`、`--vermilion`、`--font-mincho`、`--paper-surface-depth`），保持开放式长文、无卡片叠卡片。
+- 可复用渲染契约：未来 `content/blog` 下的普通 Markdown 博文与外部 Nuxt Content 页面项（如 `research` 这种非 `content/` 目录源）共用 `ArticleProse` 作为唯一正文渲染器，不建立第二套正文渲染路径；选定的导读轨、档案头图与版式规则可作为未来生产阅读页的复用基础。
+
 ### 4.6 其他页面
 
 - 项目、电影、动漫、音乐、工具、生活、笔记和关于页共享全站外壳。
