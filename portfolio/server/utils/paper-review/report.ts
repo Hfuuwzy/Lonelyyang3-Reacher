@@ -1,5 +1,7 @@
 import { z } from 'zod'
 import type { ExtractedPaperPage } from './pdf'
+import { collectStructuralHeadings } from './source-matching'
+import { verifyPaperReviewSource } from '../../paper-review-internal/report-source-verifier'
 import {
   PAPER_REVIEW_MISSING_SCOPE,
   PAPER_REVIEW_SECTION_KINDS,
@@ -63,8 +65,6 @@ const rawReportSchema = z.object({
   gaps: z.array(gapSchema).default([]),
 })
 
-type RawFinding = z.infer<typeof findingSchema>
-
 /** Stable, machine-generated English labels used to name gaps for each kind. */
 const SECTION_LABELS: Record<PaperReviewSectionKind, string> = {
   claims: 'Claims',
@@ -79,64 +79,8 @@ const GAP_REASON_NO_FINDINGS = '该章节没有提供任何论断，本次未覆
 const GAP_REASON_CITATION =
   '该章节存在未通过原文出处核验的论断（页码、章节标题或引文与 PDF 原文不符），未核验内容已剔除。'
 const GAP_REASON_PRINTED_PAGE = '该章节存在未能独立验证的印刷页标签，该印刷页信息已省略。'
-
-/** Whitespace-only normalization: collapse every run of whitespace to one space. */
-function normalizeWhitespace(text: string): string {
-  return text.replace(/\s+/g, ' ').trim()
-}
-
-function findPage(
-  pages: readonly ExtractedPaperPage[],
-  readerPage: number,
-): ExtractedPaperPage | undefined {
-  return pages.find((page) => page.readerPage === readerPage)
-}
-
-/** A reader page is only valid as a 1-based integer inside the document. */
-function isUsablePage(readerPage: number, pageCount: number): boolean {
-  return Number.isInteger(readerPage) && readerPage >= 1 && readerPage <= pageCount
-}
-
-interface VerifiedSource {
-  /** Present only when the printed label independently matched an exact line. */
-  readonly printedPage?: string
-  /** True when the printed label was provided but could not be verified. */
-  readonly printedDropped: boolean
-}
-
-/**
- * Verifies a single finding's source against the extracted pages. Returns
- * `null` when the citation cannot be grounded at all (the finding is dropped);
- * otherwise returns the grounded source, dropping an unverifiable printed label.
- */
-function verifySource(
-  source: RawFinding['source'],
-  pages: readonly ExtractedPaperPage[],
-  pageCount: number,
-): VerifiedSource | null {
-  if (!isUsablePage(source.readerPage, pageCount)) {
-    return null
-  }
-  const page = findPage(pages, source.readerPage)
-  if (page === undefined) {
-    return null
-  }
-  if (!page.headings.includes(source.heading)) {
-    return null
-  }
-  const normalizedQuote = normalizeWhitespace(source.quote)
-  if (normalizedQuote === '' || !normalizeWhitespace(page.text).includes(normalizedQuote)) {
-    return null
-  }
-  const printed = source.printedPage
-  if (printed === undefined) {
-    return { printedDropped: false }
-  }
-  if (!page.lines.some((line) => line.text === printed)) {
-    return { printedDropped: true }
-  }
-  return { printedPage: printed, printedDropped: false }
-}
+const GAP_REASON_HEADING_UNLOCATED =
+  '该章节存在未指明所属章节标题的论断（引文已核验但模型未标注所属章节标题），该论断仍被保留。'
 
 /**
  * Parse the untrusted raw Harness response and verify every finding against the
@@ -177,6 +121,7 @@ export function verifyPaperReview(
   }
 
   const pageCount = Math.max(0, ...pages.map((page) => page.readerPage))
+  const structuralHeadings = collectStructuralHeadings(pages)
   const rawSections = new Map<PaperReviewSectionKind, z.infer<typeof sectionSchema>>()
   for (const section of boundary.data.sections) {
     rawSections.set(section.kind, section)
@@ -207,15 +152,23 @@ export function verifyPaperReview(
     const findings: PaperReviewFinding[] = []
     let citationFailed = false
     let printedDropped = false
+    let headingUnlocated = false
 
     for (const rawFinding of rawSection.findings) {
-      const verified = verifySource(rawFinding.source, pages, pageCount)
-      if (verified === null) {
+      const verified = verifyPaperReviewSource(rawFinding.source, {
+        pages,
+        pageCount,
+        headings: structuralHeadings,
+      })
+      if (!verified.grounded) {
         citationFailed = true
         continue
       }
       if (verified.printedDropped) {
         printedDropped = true
+      }
+      if (verified.headingUnlocated) {
+        headingUnlocated = true
       }
       findings.push({
         statement: rawFinding.statement,
@@ -243,6 +196,9 @@ export function verifyPaperReview(
     })
     if (citationFailed) {
       gaps.push({ section: SECTION_LABELS[kind], reason: GAP_REASON_CITATION })
+    }
+    if (headingUnlocated) {
+      gaps.push({ section: SECTION_LABELS[kind], reason: GAP_REASON_HEADING_UNLOCATED })
     }
     if (printedDropped) {
       gaps.push({ section: SECTION_LABELS[kind], reason: GAP_REASON_PRINTED_PAGE })
