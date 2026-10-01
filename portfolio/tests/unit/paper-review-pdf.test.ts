@@ -4,12 +4,14 @@ import {
   InvalidPDFException,
   PasswordException,
 } from 'pdfjs-dist/legacy/build/pdf.mjs'
+import type { PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import {
   classifyLoadError,
   extractPaperPages,
   isHeadingLine,
   type ExtractedPaperPage,
 } from '../../server/utils/paper-review/pdf'
+import type { PdfLoader } from '../../server/utils/paper-review/pdf'
 import { buildSamplePdf } from '../fixtures/generate-paper-review-sample.mjs'
 
 // Fresh bytes every call: pdfjs may transfer the typed array to its worker.
@@ -147,6 +149,23 @@ describe('extractPaperPages happiness path', () => {
     }
     expect(result.pages.find((page) => page.readerPage === 1)?.text).toBe('Alpha Beta')
   })
+
+  it('extracts a Node Buffer byte input as produced by H3 multipart parsing', async () => {
+    // Given the fixture loaded as a raw Node Buffer (the shape multipart parts
+    // carry at runtime — a Buffer subclass, not a plain Uint8Array).
+    const bytes = readFileSync(new URL('../fixtures/paper-review-sample.pdf', import.meta.url))
+
+    // When the Buffer input is extracted.
+    const result = await extractPaperPages(bytes)
+
+    // Then all three pages are extracted successfully rather than being
+    // mislabelled as an invalid PDF by the pdfjs Buffer guard.
+    expect(result.success).toBe(true)
+    if (!result.success) {
+      return
+    }
+    expect(result.pages.map((page) => page.readerPage)).toEqual([1, 2, 3])
+  })
 })
 
 describe('extractPaperPages rejection path', () => {
@@ -218,10 +237,61 @@ describe('extractPaperPages rejection path', () => {
     expect(classified.code).toBe('invalid-pdf')
   })
 
-  it('maps unknown load errors to a safe invalid-pdf error', () => {
+  it('maps unknown operational load errors to a safe read-failed error', () => {
     const classified = classifyLoadError(new Error('mystery internals'))
-    expect(classified.code).toBe('invalid-pdf')
+    expect(classified.code).toBe('read-failed')
     expect(classified.message).not.toContain('mystery')
+  })
+})
+
+describe('extractPaperPages cancellation (issue #28)', () => {
+  it('returns an identifiable cancelled result for a pre-aborted signal without loading', async () => {
+    // Given a pre-aborted signal.
+    const controller = new AbortController()
+    controller.abort()
+    // When extracted with the pre-aborted signal.
+    const result = await extractPaperPages(fixtureBytes(), controller.signal, () => {
+      throw new Error('a pre-aborted extraction must not load the PDF')
+    })
+
+    // Then a terminal cancelled result is returned and no document was loaded.
+    expect(result.success).toBe(false)
+    if (result.success) {
+      return
+    }
+    expect(result.error.code).toBe('cancelled')
+    expect(result.error.message.length).toBeGreaterThan(0)
+  })
+
+  it('aborting during load disposes the loading task and returns cancelled', async () => {
+    // Given a signal aborted while the PDF worker is still loading the document.
+    const controller = new AbortController()
+    let rejectLoad: (error: Error) => void = () => {
+      throw new Error('the PDF load promise was not initialized')
+    }
+    let destroyCalls = 0
+    const loader: PdfLoader = () => ({
+      promise: new Promise<PDFDocumentProxy>((_resolve, reject) => {
+        rejectLoad = (error) => reject(error)
+      }),
+      destroy: () => {
+        destroyCalls += 1
+        rejectLoad(new Error('PDF load destroyed'))
+      },
+    })
+
+    // When extraction is started and aborted before the load can resolve.
+    const pending = extractPaperPages(fixtureBytes(), controller.signal, loader)
+    controller.abort()
+    const result = await pending
+
+    // Then the outcome is a terminal cancelled result and no pages escaped.
+    expect(result.success).toBe(false)
+    if (result.success) {
+      return
+    }
+    expect(result.error.code).toBe('cancelled')
+    expect(destroyCalls).toBe(1)
   })
 })
 
