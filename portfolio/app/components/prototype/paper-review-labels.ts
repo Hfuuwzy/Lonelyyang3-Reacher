@@ -1,5 +1,5 @@
 import { API_PROTOCOLS } from './api-settings-config'
-import type { PaperReviewSectionKind, PaperReviewStage } from '~/utils/paper-review-contract'
+import type { PaperReviewGap, PaperReviewSectionKind, PaperReviewStage } from '~/utils/paper-review-contract'
 
 export interface PaperReviewStageStep {
   readonly stage: PaperReviewStage
@@ -42,4 +42,57 @@ export const PAPER_REVIEW_PROTOCOL_OPTIONS: readonly PaperReviewProtocolOption[]
 
 export function paperReviewProtocolLabel(protocol: string): string {
   return PAPER_REVIEW_PROTOCOL_OPTIONS.find((option) => option.value === protocol)?.label ?? protocol
+}
+
+/**
+ * Display labels for known gap scopes emitted by the report pipeline or named
+ * by the model. Keys are compared after trim + lowercase, so `Claims` and
+ * `claims` map to the same label. Anything not listed here is preserved
+ * verbatim — no guessed translation.
+ */
+export const PAPER_REVIEW_GAP_SCOPE_LABELS: Readonly<Record<string, string>> = {
+  claims: '论断',
+  methods: '方法',
+  experiments: '实验',
+  evidence: '证据',
+  criticism: '批评',
+  'pdf source': 'PDF 原文',
+  overall: '整体',
+  'full-translation': '全文翻译',
+}
+
+/** Maps a gap scope string to its display label; unknown scopes stay verbatim. */
+export function paperReviewGapScopeLabel(scope: string): string {
+  return PAPER_REVIEW_GAP_SCOPE_LABELS[scope.trim().toLowerCase()] ?? scope
+}
+
+export interface PaperReviewGapItem {
+  readonly reason: string
+  /** Display labels of every scope sharing `reason`, in first-seen order. */
+  readonly scopes: readonly string[]
+}
+
+/**
+ * Groups wire gaps for display: gaps with an exactly identical reason collapse
+ * into one item listing every affected scope, duplicate reason/scope pairs are
+ * dropped, and items and scopes both keep the wire's first-seen order.
+ */
+export function paperReviewGapItems(gaps: readonly PaperReviewGap[]): readonly PaperReviewGapItem[] {
+  const scopesByReason = new Map<string, string[]>()
+  for (const gap of gaps) {
+    const scope = paperReviewGapScopeLabel(gap.section)
+    const scopes = scopesByReason.get(gap.reason)
+    if (scopes === undefined) {
+      scopesByReason.set(gap.reason, [scope])
+    } else if (!scopes.includes(scope)) {
+      scopes.push(scope)
+    }
+  }
+  return Array.from(scopesByReason, ([reason, scopes]) => ({ reason, scopes }))
+}
+
+export const PAPER_REVIEW_UNKNOWN_HEADING_LABEL = '未提供章节标题'
+
+export function paperReviewHeadingLabel(heading: string): string {
+  return heading.trim() === '' ? PAPER_REVIEW_UNKNOWN_HEADING_LABEL : heading
 }
