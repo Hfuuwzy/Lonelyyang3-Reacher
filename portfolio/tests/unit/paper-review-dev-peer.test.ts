@@ -70,6 +70,71 @@ afterEach(() => {
   }
 })
 
+describe('paper-task dev peer attestation', () => {
+  const TASK_ID = '123e4567-e89b-12d3-a456-426614174000'
+
+  it('attests the paper-task submission POST', async () => {
+    const { event, req } = makeEvent({
+      method: 'POST',
+      url: '/api/prototype/paper-task',
+      remoteAddress: '::1',
+      headers: { host: HOST, origin: ORIGIN },
+    })
+    await createDevPeerParentHandler(TEST_KEY)(event)
+    expect(req.headers[PAPER_REVIEW_DEV_PEER_HEADER]).toBe('::1')
+    expect(req.headers[PAPER_REVIEW_DEV_PROOF_HEADER]).toBe(
+      signDevPeerProof(TEST_KEY, 'POST', HOST, ORIGIN, '::1'),
+    )
+  })
+
+  it('attests the paper-task cancel POST for an exact UUID', async () => {
+    const { event, req } = makeEvent({
+      method: 'POST',
+      url: `/api/prototype/paper-task/${TASK_ID}/cancel`,
+      remoteAddress: '::1',
+      headers: { host: HOST, origin: ORIGIN },
+    })
+    await createDevPeerParentHandler(TEST_KEY)(event)
+    expect(req.headers[PAPER_REVIEW_DEV_PEER_HEADER]).toBe('::1')
+    expect(req.headers[PAPER_REVIEW_DEV_PROOF_HEADER]).toBe(
+      signDevPeerProof(TEST_KEY, 'POST', HOST, ORIGIN, '::1'),
+    )
+  })
+
+  it('attests the paper-task delete DELETE for an exact UUID', async () => {
+    const { event, req } = makeEvent({
+      method: 'DELETE',
+      url: `/api/prototype/paper-task/${TASK_ID}`,
+      remoteAddress: '::1',
+      headers: { host: HOST, origin: ORIGIN },
+    })
+    await createDevPeerParentHandler(TEST_KEY)(event)
+    expect(req.headers[PAPER_REVIEW_DEV_PEER_HEADER]).toBe('::1')
+    expect(req.headers[PAPER_REVIEW_DEV_PROOF_HEADER]).toBe(
+      signDevPeerProof(TEST_KEY, 'DELETE', HOST, ORIGIN, '::1'),
+    )
+  })
+
+  it.each([
+    ['a non-UUID cancel path', 'POST', '/api/prototype/paper-task/not-a-uuid/cancel'],
+    ['a non-UUID delete path', 'DELETE', '/api/prototype/paper-task/not-a-uuid'],
+    ['a cancel DELETE', 'DELETE', `/api/prototype/paper-task/${TASK_ID}/cancel`],
+    ['a submission DELETE', 'DELETE', '/api/prototype/paper-task'],
+    ['a GET on the submission path', 'GET', '/api/prototype/paper-task'],
+    ['an unknown paper-task path', 'POST', '/api/prototype/paper-task/extra/segment'],
+  ])('leaves %s unattested so the worker gate denies it', async (_label, method, url) => {
+    const { event, req } = makeEvent({
+      method,
+      url,
+      remoteAddress: '::1',
+      headers: { host: HOST, origin: ORIGIN },
+    })
+    await createDevPeerParentHandler(TEST_KEY)(event)
+    expect(req.headers[PAPER_REVIEW_DEV_PEER_HEADER]).toBeUndefined()
+    expect(req.headers[PAPER_REVIEW_DEV_PROOF_HEADER]).toBeUndefined()
+  })
+})
+
 describe('paper-review dev peer attestation', () => {
   it('attests and verifies a valid parent-to-worker handoff for a local peer', async () => {
     // Given: a local loopback request with a matching Origin.

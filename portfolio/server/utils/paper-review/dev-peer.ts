@@ -16,6 +16,7 @@
  */
 
 import { createHmac, timingSafeEqual } from 'node:crypto'
+import type { IncomingMessage } from 'node:http'
 import { createError, eventHandler, getRequestHeader, getRequestHost, type EventHandler, type H3Event } from 'h3'
 import { checkPaperReviewAccess } from './gate'
 
@@ -33,6 +34,30 @@ const PAPER_REVIEW_DEV_PEER_V1 = 'paper-review/dev-peer/v1'
 const MAX_PEER_LENGTH = 64
 /** A SHA-256 HMAC proof is exactly 64 lowercase hex characters. */
 const PROOF_HEX_RE = /^[0-9a-f]{64}$/
+/** An exact paper-task UUID route segment (lowercase hex UUID v4 shape). */
+const PAPER_TASK_CANCEL_PATH_RE = /^\/api\/prototype\/paper-task\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/cancel$/
+const PAPER_TASK_ID_PATH_RE = /^\/api\/prototype\/paper-task\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/
+
+/**
+ * Exact routes the parent attests. Only the known POST submissions and the
+ * UUID-shaped cancel/delete paths are signed; any other method or path falls
+ * through unattested so the worker gate denies it.
+ */
+function isAttestedRoute(method: string, pathname: string): boolean {
+  if (method === 'POST' && pathname === '/api/prototype/paper-review') {
+    return true
+  }
+  if (method === 'POST' && pathname === '/api/prototype/paper-task') {
+    return true
+  }
+  if (method === 'POST' && PAPER_TASK_CANCEL_PATH_RE.test(pathname)) {
+    return true
+  }
+  if (method === 'DELETE' && PAPER_TASK_ID_PATH_RE.test(pathname)) {
+    return true
+  }
+  return false
+}
 
 /**
  * Sign the dev-peer proof: HMAC-SHA256 over the canonical payload.
@@ -52,13 +77,13 @@ export function signDevPeerProof(
 }
 
 /**
- * Parent-side admission handler for the paper-review endpoint.
+ * Parent-side admission handler for the paper-review / paper-task endpoints.
  *
  * Registered FIRST in the dev server so it runs before the worker proxy. It
  * strips any client-supplied attestation headers, admits only the exact
- * paper-review POST using the ORIGINAL socket address through the unchanged
- * gate, then (on admission) overwrites the headers with a freshly signed proof.
- * All other requests fall through unchanged.
+ * paper-review / paper-task routes using the ORIGINAL socket address through
+ * the unchanged gate, then (on admission) overwrites the headers with a freshly
+ * signed proof. All other requests fall through unchanged.
  */
 export function createDevPeerParentHandler(secret: string): EventHandler {
   return eventHandler((event) => {
@@ -68,8 +93,8 @@ export function createDevPeerParentHandler(secret: string): EventHandler {
     delete headers[PAPER_REVIEW_DEV_PROOF_HEADER]
 
     // Exact route, ignoring query string.
-    const pathname = (req.url ?? '/').split('?')[0]
-    if (req.method !== 'POST' || pathname !== '/api/prototype/paper-review') {
+    const pathname = (req.url ?? '/').split('?')[0] ?? '/'
+    if (!isAttestedRoute(reqMethod(req), pathname)) {
       return
     }
 
@@ -84,7 +109,7 @@ export function createDevPeerParentHandler(secret: string): EventHandler {
 
     if (peer !== undefined) {
       headers[PAPER_REVIEW_DEV_PEER_HEADER] = peer
-      headers[PAPER_REVIEW_DEV_PROOF_HEADER] = signDevPeerProof(secret, req.method, host, origin, peer)
+      headers[PAPER_REVIEW_DEV_PROOF_HEADER] = signDevPeerProof(secret, reqMethod(req), host, origin, peer)
     }
   })
 }
@@ -122,7 +147,7 @@ export function consumeAttestedDevPeer(event: H3Event): string | undefined {
     return undefined
   }
 
-  const method = reqMethod(event)
+  const method = reqMethod(event.node.req)
   const host = getRequestHost(event)
   const origin = getRequestHeader(event, 'origin')
   const expected = signDevPeerProof(secret, method, host, origin, peerValue)
@@ -135,6 +160,6 @@ export function consumeAttestedDevPeer(event: H3Event): string | undefined {
 }
 
 /** The request method (upper-cased) as used in the signed payload. */
-function reqMethod(event: H3Event): string {
-  return (event.node.req.method ?? 'GET').toUpperCase()
+function reqMethod(req: IncomingMessage): string {
+  return (req.method ?? 'GET').toUpperCase()
 }
