@@ -11,6 +11,7 @@
 
 ## Test execution
 
+- Reuse an existing local development server for verification. Do not launch unattended long-lived services with `Start-Process`; if a new server is necessary, use a bounded foreground workflow with an explicit completion signal and guaranteed cleanup.
 - Choose the smallest relevant checks for changed behavior; tests are not a mandatory end-of-task ritual.
 - `npm test` and `npm run test:unit` run unit tests only.
 - Playwright E2E is opt-in: run it only when the user explicitly asks for E2E/Playwright tests. When requested, select only affected spec files or cases with a path or title filter; run the unfiltered full suite only when the user explicitly asks for the full E2E suite.
