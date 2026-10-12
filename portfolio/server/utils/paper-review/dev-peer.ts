@@ -37,6 +37,8 @@ const PROOF_HEX_RE = /^[0-9a-f]{64}$/
 /** An exact paper-task UUID route segment (lowercase hex UUID v4 shape). */
 const PAPER_TASK_CANCEL_PATH_RE = /^\/api\/prototype\/paper-task\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/cancel$/
 const PAPER_TASK_ID_PATH_RE = /^\/api\/prototype\/paper-task\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/
+const PAPER_TASK_SOURCE_PATH_RE = /^\/api\/prototype\/paper-task\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/source$/
+const PAPER_TASK_ASSET_PATH_RE = /^\/api\/prototype\/paper-task\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/assets\/asset-[0-9a-f]{32}$/
 
 /**
  * Exact routes the parent attests. Only the known POST submissions and the
@@ -54,6 +56,12 @@ function isAttestedRoute(method: string, pathname: string): boolean {
     return true
   }
   if (method === 'DELETE' && PAPER_TASK_ID_PATH_RE.test(pathname)) {
+    return true
+  }
+  if ((method === 'GET' || method === 'PATCH') && PAPER_TASK_SOURCE_PATH_RE.test(pathname)) {
+    return true
+  }
+  if (method === 'GET' && PAPER_TASK_ASSET_PATH_RE.test(pathname)) {
     return true
   }
   return false
