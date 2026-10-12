@@ -1,0 +1,95 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+2 0 obj
+<< /Length 528 >>
+stream
+BT /F1 18 Tf 72 730 Td (1 Overview) Tj ET
+BT /F1 12 Tf 72 690 Td (The proposed method preserves 47.5% accuracy under shift.) Tj ET
+BT /F1 12 Tf 72 650 Td (See [1] for the data source.) Tj ET
+BT /F1 18 Tf 72 580 Td (2 Measurements) Tj ET
+BT /F1 12 Tf 72 540 Td (Observed values are not estimates.) Tj ET
+BT /F1 12 Tf 72 500 Td (Left column statement.) Tj ET
+BT /F1 12 Tf 360 500 Td (Right column statement.) Tj ET
+BT /F1 12 Tf 72 476 Td (Left column continuation.) Tj ET
+BT /F1 12 Tf 360 476 Td (Right column continuation.) Tj ET
+endstream
+endobj
+3 0 obj
+<< /Type /Annot /Subtype /Link /Rect [70 638 230 662] /Border [0 0 0] /A << /S /URI /URI (https://example.org/data) >> >>
+endobj
+4 0 obj
+<< /Type /Annot /Subtype /Link /Rect [70 638 230 662] /Border [0 0 0] /A << /S /URI /URI (javascript:alert(1)) >> >>
+endobj
+5 0 obj
+<< /Type /Page /Parent 11 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 2 0 R /Annots [3 0 R 4 0 R] >>
+endobj
+6 0 obj
+<< /Length 1125 >>
+stream
+BT /F1 12 Tf 72 730 Td (Table 1: Measurements \(units\)) Tj ET
+BT /F1 12 Tf 72 700 Td (Group) Tj ET
+BT /F1 12 Tf 260 700 Td (Count) Tj ET
+BT /F1 12 Tf 430 700 Td (Rate) Tj ET
+BT /F1 12 Tf 72 676 Td (Control) Tj ET
+BT /F1 12 Tf 260 676 Td (120) Tj ET
+BT /F1 12 Tf 430 676 Td (47.5%) Tj ET
+BT /F1 12 Tf 72 652 Td (Method) Tj ET
+BT /F1 12 Tf 260 652 Td (115) Tj ET
+BT /F1 12 Tf 430 652 Td (52.0%) Tj ET
+BT /F1 10 Tf 72 626 Td (Notes: percentages use the full cohort.) Tj ET
+BT /F1 12 Tf 72 600 Td (The relation is defined as follows.) Tj ET
+BT /F1 12 Tf 72 570 Td (E = m c^2 \(1\)) Tj ET
+BT /F1 12 Tf 72 520 Td (Algorithm 1: Stable update) Tj ET
+BT /F1 12 Tf 92 496 Td (1. Initialize parameter vector.) Tj ET
+BT /F1 12 Tf 92 472 Td (2. Update using the measured gradient.) Tj ET
+BT /F1 16 Tf 72 420 Td (References) Tj ET
+BT /F1 12 Tf 72 392 Td ([1] Example, Data source. 2024.) Tj ET
+BT /F1 16 Tf 72 330 Td (Appendix A) Tj ET
+BT /F1 12 Tf 72 300 Td (Additional derivation retains the 47.5% value.) Tj ET
+BT /F1 9 Tf 72 60 Td (1 Footnote: baseline is defined on page 1.) Tj ET
+BT /F1 12 Tf 72 220 Td (Table 2: Caption only) Tj ET
+endstream
+endobj
+7 0 obj
+<< /Type /Annot /Subtype /Link /Rect [70 560 180 580] /Border [0 0 0] /A << /S /GoTo /D (equation) >> >>
+endobj
+8 0 obj
+<< /Type /Page /Parent 11 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 6 0 R /Annots [7 0 R] >>
+endobj
+9 0 obj
+<< /Length 0 >>
+stream
+
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 11 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 9 0 R >>
+endobj
+11 0 obj
+<< /Type /Pages /Kids [5 0 R 8 0 R 10 0 R] /Count 3 >>
+endobj
+12 0 obj
+<< /Type /Catalog /Pages 11 0 R /Names << /Dests << /Names [(equation) [8 0 R /Fit]] >> >> >>
+endobj
+xref
+0 13
+0000000000 65535 f 
+0000000009 00000 n 
+0000000079 00000 n 
+0000000658 00000 n 
+0000000795 00000 n 
+0000000927 00000 n 
+0000001076 00000 n 
+0000002253 00000 n 
+0000002373 00000 n 
+0000002516 00000 n 
+0000002565 00000 n 
+0000002693 00000 n 
+0000002764 00000 n 
+trailer
+<< /Size 13 /Root 12 0 R >>
+startxref
+2874
+%%EOF
