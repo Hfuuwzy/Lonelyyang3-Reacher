@@ -14,6 +14,7 @@ import { mkdirSync, rmSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { z } from 'zod'
+import { workerPreviewSchema, type PaperTaskWorkerPreview } from './source-pieces'
 import {
   paperTaskStageSchema,
   type PaperTaskBranch,
@@ -22,7 +23,7 @@ import {
 
 export type PaperTaskRuntimeEvent =
   | { readonly type: 'progress'; readonly stage: PaperTaskStage; readonly completed: number; readonly total: number }
-  | { readonly type: 'preview'; readonly paragraphs: readonly string[] }
+  | PaperTaskWorkerPreview
 
 export type PaperTaskBranchResult = { readonly ok: true } | { readonly ok: false }
 export type PaperTaskCloseResult = { readonly ok: true } | { readonly ok: false }
@@ -39,6 +40,10 @@ export interface PaperTaskRuntime {
 export interface PaperTaskRuntimeOptions {
   readonly branch: PaperTaskBranch
   readonly workContextPath: string
+  /** Exact prepared source files or directories the worker may read. */
+  readonly sourceReadPaths?: readonly string[]
+  /** Precreated retained branch workspace; writable by this worker only. */
+  readonly branchWorkspaceDir?: string
   /** Ephemeral per-branch home; removed by `close`. */
   readonly runtimeHome: string
   /** Aborting kills the owned process; `close` still must be called. */
@@ -62,14 +67,9 @@ const runtimeProgressSchema = z.object({
   total: z.number().int().positive(),
 }).passthrough()
 
-const runtimePreviewSchema = z.object({
-  type: z.literal('preview'),
-  paragraphs: z.array(z.string().min(1).max(2000)).min(1).max(8),
-}).passthrough()
-
 const runtimeEventSchema = z.discriminatedUnion('type', [
   runtimeProgressSchema,
-  runtimePreviewSchema,
+  workerPreviewSchema,
 ])
 
 /** Max bytes on a single runtime event line, so a bad child cannot exhaust memory. */
@@ -91,7 +91,18 @@ class SampleProcessRuntime implements PaperTaskRuntime {
     mkdirSync(options.runtimeHome, { recursive: true })
 
     const nodePath = deps.nodePath ?? process.execPath
-    const args = [deps.workerPath ?? DEFAULT_WORKER_PATH, options.workContextPath, options.branch]
+    const workerPath = resolve(deps.workerPath ?? DEFAULT_WORKER_PATH)
+    const args = [
+      '--permission',
+      `--allow-fs-read=${resolve(options.workContextPath)}`,
+      `--allow-fs-read=${workerPath}`,
+      ...(options.sourceReadPaths ?? []).map((path) => `--allow-fs-read=${resolve(path)}`),
+      ...(options.branchWorkspaceDir === undefined ? [] : [`--allow-fs-read=${resolve(options.branchWorkspaceDir)}`]),
+      ...(options.branchWorkspaceDir === undefined ? [] : [`--allow-fs-write=${resolve(options.branchWorkspaceDir)}`]),
+      workerPath,
+      resolve(options.workContextPath),
+      options.branch,
+    ]
     const env: NodeJS.ProcessEnv = {}
     for (const key of ['PATH', 'SystemRoot', 'TEMP', 'TMP']) {
       const value = process.env[key]

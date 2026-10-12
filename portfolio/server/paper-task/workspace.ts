@@ -10,9 +10,12 @@
 
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import type { PaperTaskBranch, PaperTaskSelection } from '../../app/utils/paper-task-contract'
 
 export const ORIGINAL_PDF_NAME = 'original.pdf'
 export const WORK_CONTEXT_NAME = 'work-context.json'
+export const SOURCE_RECORDS_DIR = 'source-records'
+export const SOURCE_STATE_NAME = 'source-state.json'
 
 export interface PaperTaskWorkspacePaths {
   readonly root: string
@@ -20,6 +23,9 @@ export interface PaperTaskWorkspacePaths {
   readonly workContextPath: string
   readonly draftsDir: string
   readonly assetsDir: string
+  readonly sourceRecordsDir: string
+  readonly sourceStatePath: string
+  readonly branchDirectories: Readonly<Record<'translation' | 'deep-reading', string>>
 }
 
 /** Layout paths for a task workspace rooted at `root`. */
@@ -30,14 +36,28 @@ export function workspacePaths(root: string): PaperTaskWorkspacePaths {
     workContextPath: join(root, WORK_CONTEXT_NAME),
     draftsDir: join(root, 'drafts'),
     assetsDir: join(root, 'assets'),
+    sourceRecordsDir: join(root, SOURCE_RECORDS_DIR),
+    sourceStatePath: join(root, SOURCE_STATE_NAME),
+    branchDirectories: {
+      translation: join(root, 'drafts', 'translation'),
+      'deep-reading': join(root, 'drafts', 'deep-reading'),
+    },
   }
 }
 
 export interface PaperTaskWorkContext {
   readonly taskId: string
-  readonly selection: string
+  readonly selection: PaperTaskSelection
   readonly pageCount: number
-  readonly sourceExcerpt: string
+  readonly sourceRecordsDir: string
+  readonly assetsDir: string
+  readonly sourceStatePath: string
+}
+
+export type DraftPieceMetadata = {
+  readonly id: string
+  readonly dependencies: readonly { readonly recordId: string; readonly revision: number }[]
+  readonly stale: boolean
 }
 
 /**
@@ -51,6 +71,9 @@ export function createPaperTaskWorkspace(
   const paths = workspacePaths(root)
   mkdirSync(paths.draftsDir, { recursive: true })
   mkdirSync(paths.assetsDir, { recursive: true })
+  mkdirSync(paths.sourceRecordsDir, { recursive: true })
+  mkdirSync(join(paths.branchDirectories.translation, 'pieces'), { recursive: true })
+  mkdirSync(join(paths.branchDirectories['deep-reading'], 'pieces'), { recursive: true })
   writeFileSync(paths.originalPath, originalPdf)
   return paths
 }
@@ -61,9 +84,16 @@ export function saveWorkContext(root: string, workContext: PaperTaskWorkContext)
 }
 
 /** Persist one branch's sample draft output as `drafts/<branch>.json`. */
-export function saveDraft(root: string, branch: string, payload: unknown): void {
-  writeFileSync(join(workspacePaths(root).draftsDir, `${branch}.json`), JSON.stringify(payload))
+export function saveDraft(root: string, branch: PaperTaskBranch, payload: unknown): void {
+  writeFileSync(join(workspacePaths(root).branchDirectories[branch], 'draft.json'), JSON.stringify(payload))
 }
+
+export function saveDraftPiece(root: string, branch: PaperTaskBranch, piece: DraftPieceMetadata): void {
+  const directory = join(workspacePaths(root).branchDirectories[branch], 'pieces')
+  mkdirSync(directory, { recursive: true })
+  writeFileSync(join(directory, `${piece.id}.json`), JSON.stringify(piece))
+}
+
 
 /** Remove the whole retained workspace; intended to run only after cleanup. */
 export function removePaperTaskWorkspace(root: string): void {

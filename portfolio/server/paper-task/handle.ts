@@ -24,6 +24,7 @@ export interface PaperTaskHandle {
   stopReason: 'cancel' | 'disconnect' | undefined
   anyFailed: boolean
   cleanupFailed: boolean
+  finalized: boolean
   /** True once the event stream starts executing; controls cancel/remove waits. */
   started: boolean
   settled: Promise<void>
@@ -59,6 +60,7 @@ export function makeHandle(
     stopReason: undefined,
     anyFailed: false,
     cleanupFailed: false,
+    finalized: false,
     started: false,
     settled,
     settle,
@@ -115,6 +117,7 @@ export function finalizeHandle(handle: PaperTaskHandle, runners: readonly Promis
         }
       }
     } finally {
+      handle.finalized = true
       handle.settle()
     }
   })()

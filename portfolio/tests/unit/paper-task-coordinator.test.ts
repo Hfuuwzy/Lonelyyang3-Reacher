@@ -1,4 +1,6 @@
+/// <reference types="node" />
 import { afterEach, describe, expect, it } from 'vitest'
+import { preparedExtractionFixture } from '../fixtures/paper-task-source'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -62,7 +64,7 @@ function makeFakeRuntime(spec: FakeRuntimeSpec): { runtime: PaperTaskRuntime; ha
         if (event.type === 'progress') {
           yield { type: 'progress', stage: event.stage ?? 'generating', completed: event.completed ?? 0, total: event.total ?? 1 }
         } else {
-          yield { type: 'preview', paragraphs: event.paragraphs ?? ['样例段落'] }
+          yield { type: 'preview', paragraphs: event.paragraphs ?? ['样例段落'], pieces: [] }
         }
       }
       if (spec.hang === true) {
@@ -105,7 +107,7 @@ function input(selection: 'translation' | 'deep-reading' | 'both'): PaperTaskMul
 }
 
 function extractor(result: PaperExtractionResult) {
-  return async (): Promise<PaperExtractionResult> => result
+  return async () => preparedExtractionFixture(result)
 }
 
 let roots: string[] = []
@@ -116,7 +118,7 @@ function service(deps: { factory: PaperTaskRuntimeFactory; extraction?: PaperExt
   return createPaperTaskService({
     projectRoot: root,
     runtimeFactory: deps.factory,
-    extractPaperPages: extractor(deps.extraction ?? SUCCESS_EXTRACTION),
+    prepareSource: extractor(deps.extraction ?? SUCCESS_EXTRACTION),
     createId: () => TASK_ID,
   })
 }
@@ -201,7 +203,7 @@ describe('paper-task coordinator submit', () => {
     const svc = createPaperTaskService({
       projectRoot: root,
       runtimeFactory: factory,
-      extractPaperPages: extractor(SUCCESS_EXTRACTION),
+      prepareSource: extractor(SUCCESS_EXTRACTION),
       createId: () => TASK_ID,
     })
     const submission = await svc.submit(input('translation'))
@@ -212,7 +214,7 @@ describe('paper-task coordinator submit', () => {
     const workspace = join(root, 'project-local', TASK_ID)
     expect(existsSync(join(workspace, 'original.pdf'))).toBe(true)
     expect(existsSync(join(workspace, 'work-context.json'))).toBe(true)
-    expect(existsSync(join(workspace, 'drafts', 'translation.json'))).toBe(true)
+    expect(existsSync(join(workspace, 'drafts', 'translation', 'draft.json'))).toBe(true)
     expect(existsSync(join(workspace, 'assets'))).toBe(true)
   })
 })
@@ -298,7 +300,7 @@ describe('paper-task coordinator deletion', () => {
     const svc = createPaperTaskService({
       projectRoot: root,
       runtimeFactory: factory,
-      extractPaperPages: extractor(SUCCESS_EXTRACTION),
+      prepareSource: extractor(SUCCESS_EXTRACTION),
       createId: () => TASK_ID,
     })
     const submission = await svc.submit(input('translation'))
@@ -319,7 +321,7 @@ describe('paper-task coordinator deletion', () => {
     const svc = createPaperTaskService({
       projectRoot: root,
       runtimeFactory: factory,
-      extractPaperPages: extractor(SUCCESS_EXTRACTION),
+      prepareSource: extractor(SUCCESS_EXTRACTION),
       createId: () => TASK_ID,
     })
     const submission = await svc.submit(input('translation'))
@@ -368,7 +370,7 @@ describe('paper-task coordinator deletion', () => {
         factoryCalls += 1
         throw new Error('runtime factory must stay fenced')
       },
-      extractPaperPages: extractor(SUCCESS_EXTRACTION),
+      prepareSource: extractor(SUCCESS_EXTRACTION),
       createId: () => TASK_ID,
     })
     const submission = await svc.submit(input('translation'))
@@ -390,7 +392,7 @@ describe('paper-task coordinator deletion', () => {
       mkdirSync(runtimeHome, { recursive: true })
       return {
         events: async function* () {
-          yield { type: 'preview', paragraphs: ['完成'] }
+          yield { type: 'preview', paragraphs: ['完成'], pieces: [] }
         },
         result: Promise.resolve({ ok: true }),
         close: async () => {
@@ -402,7 +404,7 @@ describe('paper-task coordinator deletion', () => {
     const svc = createPaperTaskService({
       projectRoot: root,
       runtimeFactory: factory,
-      extractPaperPages: extractor(SUCCESS_EXTRACTION),
+      prepareSource: extractor(SUCCESS_EXTRACTION),
       createId: () => TASK_ID,
     })
     const submission = await svc.submit(input('translation'))
@@ -482,7 +484,7 @@ describe('paper-task coordinator deletion', () => {
     const svc = createPaperTaskService({
       projectRoot: root,
       runtimeFactory: factory,
-      extractPaperPages: extractor(SUCCESS_EXTRACTION),
+      prepareSource: extractor(SUCCESS_EXTRACTION),
       createId: () => TASK_ID,
     })
     const submission = await svc.submit(input('translation'))
@@ -505,7 +507,7 @@ describe('paper-task coordinator boundary errors', () => {
     const svc = createPaperTaskService({
       projectRoot: join(blocker, 'nested'),
       runtimeFactory: factory,
-      extractPaperPages: extractor(SUCCESS_EXTRACTION),
+      prepareSource: extractor(SUCCESS_EXTRACTION),
       createId: () => TASK_ID,
     })
     const submission = await svc.submit(input('translation'))
@@ -551,6 +553,7 @@ describe('paper-task independent branches and early return', () => {
     while (!event.done && event.value.type !== 'preview') {
       event = await iterator.next()
     }
+    if (iterator.return === undefined) throw new Error('task iterator must support early return')
     await iterator.return()
     for (const handle of handles) {
       expect(handle.closeCalls).toBeGreaterThan(0)

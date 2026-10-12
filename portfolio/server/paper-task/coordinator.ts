@@ -17,6 +17,7 @@ import {
   type PaperTaskEvent,
 } from '../../app/utils/paper-task-contract'
 import type { PaperTaskMultipartInput } from './multipart'
+import type { PaperTaskSourceResult } from '../../app/utils/paper-task-source-contract'
 import {
   createPaperTaskWorkspace,
   removePaperTaskWorkspace,
@@ -28,15 +29,16 @@ import {
 import { finalizeHandle, makeHandle, requestStop, type PaperTaskHandle } from './handle'
 import {
   createTaskEvents,
-  type ExtractPaperPages,
 } from './stream'
+import { createPaperTaskSourceStore, type StoredSource } from './source-store'
+import { correctPaperTaskSource, type PaperTaskCorrection, type PaperTaskCorrectionResult } from './source-correction'
 
 const SAFE_CREATE_MESSAGE = '任务工作区创建失败，请稍后重试。'
 const SAFE_SELECTION_MESSAGE = '任务分支选择不受支持，请选择翻译、深读或两者。'
 
 export interface PaperTaskServiceDependencies {
   readonly runtimeFactory?: PaperTaskRuntimeFactory
-  readonly extractPaperPages?: ExtractPaperPages
+  readonly prepareSource?: (bytes: Uint8Array, signal?: AbortSignal) => Promise<PaperTaskSourceResult>
   readonly createId?: () => string
   readonly projectRoot?: string
 }
@@ -49,16 +51,25 @@ export interface PaperTaskService {
   submit(input: PaperTaskMultipartInput, options?: { readonly signal?: AbortSignal }): Promise<PaperTaskSubmitResult>
   cancel(taskId: string): Promise<PaperTaskActionResult>
   remove(taskId: string): Promise<PaperTaskActionResult>
+  source(taskId: string): StoredSource | undefined
+  asset(taskId: string, assetId: string): Uint8Array | undefined
+  correctSource(taskId: string, input: PaperTaskCorrection): PaperTaskCorrectionResult
 }
 
 export function createPaperTaskService(
   dependencies: PaperTaskServiceDependencies = {},
 ): PaperTaskService {
   const runtimeFactory = dependencies.runtimeFactory ?? createSampleProcessRuntimeFactory()
-  const extractPaperPages = dependencies.extractPaperPages ?? defaultExtractPaperPages
+  const prepareSource = dependencies.prepareSource ?? defaultPrepareSource
   const createId = dependencies.createId ?? (() => randomUUID())
   const projectRoot = dependencies.projectRoot ?? resolve(process.cwd(), '.data', 'paper-tasks')
   const store = new Map<string, PaperTaskHandle>()
+  const sourceStore = createPaperTaskSourceStore()
+  const deleting = new Set<string>()
+
+  function workspaceRoot(taskId: string): string {
+    return join(projectRoot, 'project-local', taskId)
+  }
 
   async function submit(
     input: PaperTaskMultipartInput,
@@ -69,20 +80,20 @@ export function createPaperTaskService(
       return { ok: false, statusCode: 400, message: SAFE_SELECTION_MESSAGE }
     }
     const taskId = createId()
-    const workspaceRoot = join(projectRoot, 'project-local', taskId)
+    const retainedRoot = workspaceRoot(taskId)
     const runtimeRoot = join(projectRoot, 'runtime-local', taskId)
     try {
-      createPaperTaskWorkspace(workspaceRoot, input.pdf)
+      createPaperTaskWorkspace(retainedRoot, input.pdf)
     } catch {
       return { ok: false, statusCode: 500, message: SAFE_CREATE_MESSAGE }
     }
 
-    const handle = makeHandle(taskId, selection.data, workspaceRoot, runtimeRoot, options.signal)
+    const handle = makeHandle(taskId, selection.data, retainedRoot, runtimeRoot, options.signal)
     store.set(taskId, handle)
     return {
       ok: true,
       taskId,
-      events: createTaskEvents(handle, input, runtimeFactory, extractPaperPages),
+      events: createTaskEvents(handle, input, runtimeFactory, prepareSource, sourceStore),
     }
   }
 
@@ -100,24 +111,47 @@ export function createPaperTaskService(
 
   async function remove(taskId: string): Promise<PaperTaskActionResult> {
     const handle = store.get(taskId)
-    if (handle === undefined) {
+    if (handle === undefined || deleting.has(taskId)) {
       return { ok: false, code: 'not-found' }
     }
+    deleting.add(taskId)
     requestStop(handle, 'cancel')
     await waitSettled(handle)
     if (handle.cleanupFailed) {
+      deleting.delete(taskId)
       return { ok: false, code: 'cleanup-failed' }
     }
     try {
       removePaperTaskWorkspace(handle.workspaceRoot)
     } catch {
+      deleting.delete(taskId)
       return { ok: false, code: 'cleanup-failed' }
     }
     store.delete(taskId)
+    sourceStore.forget(taskId)
+    deleting.delete(taskId)
     return { ok: true, code: 'deleted' }
   }
 
-  return { submit, cancel, remove }
+  function source(taskId: string): StoredSource | undefined {
+    if (deleting.has(taskId)) return undefined
+    return sourceStore.read(taskId, workspaceRoot(taskId))
+  }
+
+  function asset(taskId: string, assetId: string): Uint8Array | undefined {
+    if (deleting.has(taskId)) return undefined
+    return sourceStore.readAsset(taskId, workspaceRoot(taskId), assetId)
+  }
+
+  function correctSource(taskId: string, correction: PaperTaskCorrection): PaperTaskCorrectionResult {
+    const handle = store.get(taskId)
+    if (handle === undefined || deleting.has(taskId) || !handle.finalized || handle.cleanupFailed) {
+      return { kind: 'unavailable' }
+    }
+    return correctPaperTaskSource(sourceStore, taskId, handle.workspaceRoot, correction)
+  }
+
+  return { submit, cancel, remove, source, asset, correctSource }
 }
 
 /**
@@ -133,10 +167,10 @@ async function waitSettled(handle: PaperTaskHandle): Promise<void> {
   await handle.settled
 }
 
-async function defaultExtractPaperPages(
+async function defaultPrepareSource(
   bytes: Uint8Array,
   signal?: AbortSignal,
-): Promise<Awaited<ReturnType<ExtractPaperPages>>> {
-  const { extractPaperPages } = await import('../utils/paper-review/pdf')
-  return extractPaperPages(bytes, signal)
+): Promise<PaperTaskSourceResult> {
+  const { preparePaperTaskSource } = await import('./source')
+  return preparePaperTaskSource(bytes, signal)
 }

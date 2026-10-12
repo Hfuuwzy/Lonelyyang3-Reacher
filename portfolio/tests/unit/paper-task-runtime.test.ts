@@ -1,5 +1,6 @@
+/// <reference types="node" />
 import { afterEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
@@ -34,7 +35,13 @@ describe('paper-task process runtime', () => {
     const root = tempRoot()
     const runtimeHome = join(root, 'home')
     const workContextPath = join(root, 'context.json')
-    writeFileSync(workContextPath, JSON.stringify({ sourceExcerpt: 'A sample source.' }))
+    const sourceRecordsDir = join(root, 'source-records')
+    mkdirSync(sourceRecordsDir)
+    writeFileSync(join(sourceRecordsDir, 'p1-r0.json'), JSON.stringify({
+      revision: 1,
+      record: { id: 'p1-r0', order: 0, kind: 'body', text: 'A sample source.', state: 'present', sectionId: null, context: '' },
+    }))
+    writeFileSync(workContextPath, JSON.stringify({ sourceRecordsDir }))
     process.env.PAPER_TASK_TEST_SECRET = 'must-not-reach-child'
     let seenArgs: readonly string[] = []
     let seenEnv: NodeJS.ProcessEnv = {}
@@ -46,7 +53,7 @@ describe('paper-task process runtime', () => {
         seenChild = spawn(nodePath, args, { cwd: home, env, stdio: ['ignore', 'pipe', 'pipe'] })
         return seenChild
       },
-    })(options(runtimeHome, workContextPath))
+    })({ ...options(runtimeHome, workContextPath), sourceReadPaths: [sourceRecordsDir] })
 
     const events = []
     for await (const event of runtime.events()) {
@@ -54,11 +61,12 @@ describe('paper-task process runtime', () => {
     }
 
     expect(await runtime.result).toEqual({ ok: true })
-    expect(seenArgs[0]).toBe(resolve(process.cwd(), 'server', 'paper-task', 'sample-worker.mjs'))
+    const workerPath = resolve(process.cwd(), 'server', 'paper-task', 'sample-worker.mjs')
+    expect(seenArgs).toContain(workerPath)
     expect(seenEnv.PAPER_TASK_TEST_SECRET).toBeUndefined()
     expect(Object.keys(seenEnv).every((key) => ['PATH', 'SystemRoot', 'TEMP', 'TMP'].includes(key))).toBe(true)
     expect(events.some((event) => event.type === 'preview')).toBe(true)
-    expect(seenChild?.spawnargs[1]).toBe(seenArgs[0])
+    expect(seenChild?.spawnargs).toContain(workerPath)
     expect(await runtime.close()).toEqual({ ok: true })
     expect(existsSync(runtimeHome)).toBe(false)
   })

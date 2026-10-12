@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import type { PaperExtractionResult } from '../utils/paper-review/pdf'
+import type { PaperTaskSourceResult } from '../../app/utils/paper-task-source-contract'
 import {
   getSelectedBranches,
   type PaperTaskBranch,
@@ -8,20 +8,21 @@ import {
   type PaperTaskOutcome,
 } from '../../app/utils/paper-task-contract'
 import type { PaperTaskMultipartInput } from './multipart'
-import { saveDraft, saveWorkContext, workspacePaths } from './workspace'
-import type { PaperTaskRuntime, PaperTaskRuntimeFactory } from './runtime'
-import { cleanupStatus, closeRuntime, finalizeHandle, requestStop, stopOutcome, type PaperTaskHandle } from './handle'
+import { saveWorkContext, workspacePaths } from './workspace'
+import type { PaperTaskRuntimeFactory } from './runtime'
+import { cleanupStatus, finalizeHandle, requestStop, stopOutcome, type PaperTaskHandle } from './handle'
 import { EventQueue, takeOrAbort } from './queue'
+import type { createPaperTaskSourceStore } from './source-store'
+import { runPaperTaskBranch } from './branch-stream'
 
-export type ExtractPaperPages = (bytes: Uint8Array, signal?: AbortSignal) => Promise<PaperExtractionResult>
-
-const EXCERPT_CHAR_CAP = 6000
+export type PreparePaperTaskSource = (bytes: Uint8Array, signal?: AbortSignal) => Promise<PaperTaskSourceResult>
 
 export function createTaskEvents(
   handle: PaperTaskHandle,
   input: PaperTaskMultipartInput,
   runtimeFactory: PaperTaskRuntimeFactory,
-  extractPaperPages: ExtractPaperPages,
+  prepareSource: PreparePaperTaskSource,
+  sourceStore: ReturnType<typeof createPaperTaskSourceStore>,
 ): AsyncIterable<PaperTaskEvent> {
   const queue = new EventQueue<{ readonly kind: 'event'; readonly event: PaperTaskEvent }>()
   const branchQueue = new EventQueue()
@@ -34,7 +35,7 @@ export function createTaskEvents(
       return
     }
     handle.started = true
-    producer = produceTask(handle, input, runtimeFactory, extractPaperPages, queue, branchQueue, runners, () => suppressTerminal)
+    producer = produceTask(handle, input, runtimeFactory, prepareSource, sourceStore, queue, branchQueue, runners, () => suppressTerminal)
   }
 
   return {
@@ -58,7 +59,7 @@ export function createTaskEvents(
           requestStop(handle, 'disconnect')
           if (producer === undefined) {
             handle.started = true
-            producer = produceTask(handle, input, runtimeFactory, extractPaperPages, queue, branchQueue, runners, () => true)
+            producer = produceTask(handle, input, runtimeFactory, prepareSource, sourceStore, queue, branchQueue, runners, () => true)
           }
           await handle.settled
           return { done: true, value: undefined }
@@ -72,7 +73,8 @@ async function produceTask(
   handle: PaperTaskHandle,
   input: PaperTaskMultipartInput,
   runtimeFactory: PaperTaskRuntimeFactory,
-  extractPaperPages: ExtractPaperPages,
+  prepareSource: PreparePaperTaskSource,
+  sourceStore: ReturnType<typeof createPaperTaskSourceStore>,
   queue: EventQueue<{ readonly kind: 'event'; readonly event: PaperTaskEvent }>,
   branchQueue: EventQueue,
   runners: Promise<void>[],
@@ -83,11 +85,11 @@ async function produceTask(
   queue.push({ kind: 'event', event: { type: 'accepted', taskId: handle.taskId, selection: input.selection } })
   queue.push({ kind: 'event', event: progressEvent(handle.taskId, 'preparing', null, 0, 1) })
   try {
-    const extraction = await extractPaperPages(input.pdf, handle.controller.signal)
+    const prepared = await prepareSource(input.pdf, handle.controller.signal)
     if (handle.controller.signal.aborted) {
       return
     }
-    if (!extraction.success) {
+    if (!prepared.success) {
       outcome = 'failed'
       markUnfinished(handle.branches, selected, 'failed')
       return
@@ -97,9 +99,12 @@ async function produceTask(
       saveWorkContext(handle.workspaceRoot, {
         taskId: handle.taskId,
         selection: input.selection,
-        pageCount: extraction.pageCount,
-        sourceExcerpt: buildExcerpt(extraction.pages),
+        pageCount: prepared.source.pageCount,
+        sourceRecordsDir: workspacePaths(handle.workspaceRoot).sourceRecordsDir,
+        assetsDir: workspacePaths(handle.workspaceRoot).assetsDir,
+        sourceStatePath: workspacePaths(handle.workspaceRoot).sourceStatePath,
       })
+      sourceStore.save(handle.taskId, handle.workspaceRoot, prepared.source, prepared.assets)
     } catch {
       outcome = 'failed'
       markUnfinished(handle.branches, selected, 'failed')
@@ -107,6 +112,9 @@ async function produceTask(
     }
 
     const workContextPath = workspacePaths(handle.workspaceRoot).workContextPath
+    const sourceRecords = sourceStore.records(handle.taskId, handle.workspaceRoot)
+    if (sourceRecords === undefined) throw new Error('prepared source unavailable')
+    const sourceReadPaths = sourceStore.workerReadPaths(handle.taskId, handle.workspaceRoot)
     const doneBranches = new Set<PaperTaskBranch>()
     for (const branch of selected) {
       if (handle.controller.signal.aborted) {
@@ -116,11 +124,13 @@ async function produceTask(
         const runtime = runtimeFactory({
           branch,
           workContextPath,
+          sourceReadPaths,
+          branchWorkspaceDir: workspacePaths(handle.workspaceRoot).branchDirectories[branch],
           runtimeHome: join(handle.runtimeRoot, branch),
           signal: handle.controller.signal,
         })
         handle.runtimes.set(branch, runtime)
-        runners.push(runBranch(handle, branch, runtime, branchQueue))
+        runners.push(runPaperTaskBranch({ handle, branch, runtime, queue: branchQueue, sourceRecords }))
       } catch {
         doneBranches.add(branch)
         handle.branches[branch] = 'failed'
@@ -166,70 +176,6 @@ async function produceTask(
   }
 }
 
-async function runBranch(
-  handle: PaperTaskHandle,
-  branch: PaperTaskBranch,
-  runtime: PaperTaskRuntime,
-  queue: EventQueue,
-): Promise<void> {
-  let ok = false
-  let sawPreview = false
-  try {
-    const events = runtime.events()[Symbol.asyncIterator]()
-    while (!handle.controller.signal.aborted) {
-      const next = await awaitOrAbort(events.next(), handle.controller.signal)
-      if (next.kind === 'aborted' || next.value.done || handle.controller.signal.aborted) {
-        break
-      }
-      const event = next.value.value
-      if (event.type === 'progress') {
-        queue.push({ kind: 'event', event: progressEvent(handle.taskId, event.stage, branch, event.completed, event.total) })
-      } else {
-        try {
-          saveDraft(handle.workspaceRoot, branch, { designation: 'sample', paragraphs: [...event.paragraphs] })
-        } catch {
-          throw new Error('draft write failed')
-        }
-        sawPreview = true
-        queue.push({ kind: 'event', event: { type: 'preview', taskId: handle.taskId, branch, designation: 'sample', paragraphs: [...event.paragraphs] } })
-      }
-    }
-    if (!handle.controller.signal.aborted) {
-      const result = await awaitOrAbort(runtime.result, handle.controller.signal)
-      ok = result.kind === 'value' && result.value.ok && sawPreview
-    }
-  } catch {
-    ok = false
-  } finally {
-    if (ok) {
-      handle.branches[branch] = 'sample-ready'
-    } else if (!handle.controller.signal.aborted) {
-      handle.branches[branch] = 'failed'
-    }
-    void closeRuntime(handle, runtime)
-    queue.push({ kind: 'done', branch, ok })
-  }
-}
-
-function awaitOrAbort<T>(
-  promise: Promise<T>,
-  signal: AbortSignal,
-): Promise<{ readonly kind: 'value'; readonly value: T } | { readonly kind: 'aborted' }> {
-  if (signal.aborted) {
-    return Promise.resolve({ kind: 'aborted' })
-  }
-  let removeAbortListener = (): void => undefined
-  const aborted = new Promise<{ readonly kind: 'aborted' }>((resolve) => {
-    const onAbort = (): void => resolve({ kind: 'aborted' })
-    signal.addEventListener('abort', onAbort, { once: true })
-    removeAbortListener = () => signal.removeEventListener('abort', onAbort)
-  })
-  return Promise.race([
-    promise.then((value) => ({ kind: 'value' as const, value })),
-    aborted,
-  ]).finally(removeAbortListener)
-}
-
 function markUnfinished(
   branches: PaperTaskBranches,
   selected: readonly PaperTaskBranch[],
@@ -259,8 +205,4 @@ function terminalEvent(
   cleanup: 'clean' | 'failed',
 ): PaperTaskEvent {
   return { type: 'terminal', taskId, outcome, branches: { ...branches }, cleanup }
-}
-
-function buildExcerpt(pages: readonly { readonly text: string }[]): string {
-  return pages.map((page) => page.text).join('\n').slice(0, EXCERPT_CHAR_CAP)
 }

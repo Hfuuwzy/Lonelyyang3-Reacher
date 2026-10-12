@@ -9,14 +9,15 @@
  * No model, SDK, or paid call is involved.
  */
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
 
 const WORK_CONTEXT_PATH = process.argv[2]
 const BRANCH = process.argv[3]
 
 const MAX_PARAGRAPHS = 8
 const MAX_PARAGRAPH_LENGTH = 2000
-const EXCERPT_LINE_CAP = 6
+const DISPLAY_LINE_CAP = 6
 
 function emit(event) {
   process.stdout.write(`${JSON.stringify(event)}\n`)
@@ -35,30 +36,46 @@ function parseWorkContext() {
     fail('sample worker: unsupported branch')
   }
   try {
-    return JSON.parse(readFileSync(WORK_CONTEXT_PATH, 'utf8'))
+    const context = JSON.parse(readFileSync(WORK_CONTEXT_PATH, 'utf8'))
+    const records = readdirSync(context.sourceRecordsDir)
+      .filter((name) => /^p\d+-r\d+\.json$/.test(name))
+      .map((name) => JSON.parse(readFileSync(join(context.sourceRecordsDir, name), 'utf8')))
+      .sort((left, right) => left.record.order - right.record.order)
+    return { ...context, records }
   } catch {
     fail('sample worker: work-context unreadable')
   }
 }
 
-function buildSampleParagraphs(context, branch) {
-  const sourceLines = String(context.sourceExcerpt ?? '')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .slice(0, EXCERPT_LINE_CAP)
-
+function buildSamplePreview(context, branch) {
+  const textKinds = new Set(['heading', 'body', 'appendix', 'footnote', 'reference'])
+  const sourceRecords = context.records
+    .map((entry) => entry.record)
+    .filter((record) => record.state === 'present' && textKinds.has(record.kind) && record.text.trim() !== '')
+    .slice(0, DISPLAY_LINE_CAP)
   const branchLabel = branch === 'translation' ? '翻译' : '深读'
   const paragraphs = [
     `【样例·${branchLabel}·未完成】本预览仅为示例，由论文原文生成演示段落，不表示${branchLabel === '翻译' ? '译文' : '分析'}已完成或通过质量检查。`,
   ]
-  for (const line of sourceLines) {
-    const paragraph = `原文示例（未完成）：${line.slice(0, MAX_PARAGRAPH_LENGTH - 24)}`
+  const pieces = []
+  for (const record of sourceRecords) {
+    const paragraph = `原文示例（未完成）：${record.text.slice(0, MAX_PARAGRAPH_LENGTH - 24)}`
     if (paragraph.length > 0) {
+      const contextRecord = [...context.records].reverse().find((candidate) =>
+        candidate.record.order < record.order && candidate.record.text === record.context,
+      )
+      const dependencyRecordIds = new Set([record.id])
+      if (record.sectionId !== null) dependencyRecordIds.add(record.sectionId)
+      if (contextRecord !== undefined) dependencyRecordIds.add(contextRecord.record.id)
+      pieces.push({
+        paragraphIndex: paragraphs.length,
+        recordId: record.id,
+        dependencyRecordIds: [...dependencyRecordIds],
+      })
       paragraphs.push(paragraph)
     }
   }
-  return paragraphs.slice(0, MAX_PARAGRAPHS)
+  return { paragraphs: paragraphs.slice(0, MAX_PARAGRAPHS), pieces }
 }
 
 const context = parseWorkContext()
@@ -67,8 +84,8 @@ emit({ type: 'progress', stage: 'preparing', completed: 0, total: 2 })
 emit({ type: 'progress', stage: 'preparing', completed: 1, total: 2 })
 emit({ type: 'progress', stage: 'generating', completed: 0, total: 2 })
 
-const paragraphs = buildSampleParagraphs(context, BRANCH)
-emit({ type: 'preview', paragraphs })
+const preview = buildSamplePreview(context, BRANCH)
+emit({ type: 'preview', paragraphs: preview.paragraphs, pieces: preview.pieces })
 
 emit({ type: 'progress', stage: 'generating', completed: 1, total: 2 })
 emit({ type: 'progress', stage: 'generating', completed: 2, total: 2 })

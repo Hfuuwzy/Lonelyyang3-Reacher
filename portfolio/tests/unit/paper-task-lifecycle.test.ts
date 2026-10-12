@@ -1,4 +1,6 @@
+/// <reference types="node" />
 import { afterEach, describe, expect, it } from 'vitest'
+import { preparedExtractionFixture } from '../fixtures/paper-task-source'
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -23,8 +25,8 @@ const PAGE: ExtractedPaperPage = {
   text: 'fixture heading\nreal source line one',
 }
 
-function successExtractor(): (bytes: Uint8Array, signal?: AbortSignal) => Promise<PaperExtractionResult> {
-  return async () => ({ success: true, pageCount: 1, pages: [PAGE] })
+function successExtractor() {
+  return async () => preparedExtractionFixture({ success: true, pageCount: 1, pages: [PAGE] })
 }
 
 function input(selection: 'translation' | 'deep-reading' | 'both'): PaperTaskMultipartInput {
@@ -33,7 +35,9 @@ function input(selection: 'translation' | 'deep-reading' | 'both'): PaperTaskMul
 
 /** Spawn a real node child whose script writes JSON events then exits 0. */
 function workerScriptEventLine(event: unknown): string {
-  return `process.stdout.write(${JSON.stringify(JSON.stringify(event))} + '\\n')`
+  const output = typeof event === 'object' && event !== null && 'type' in event && event.type === 'preview'
+    ? { ...event, pieces: [] } : event
+  return `process.stdout.write(${JSON.stringify(JSON.stringify(output))} + '\\n')`
 }
 
 let roots: string[] = []
@@ -60,7 +64,7 @@ function makeService(factory: ReturnType<typeof createSampleProcessRuntimeFactor
   return createPaperTaskService({
     projectRoot: root,
     runtimeFactory: factory,
-    extractPaperPages: successExtractor(),
+    prepareSource: successExtractor(),
     createId: () => TASK_ID,
   })
 }
@@ -129,11 +133,11 @@ describe('paper-task lifecycle — real local child processes', () => {
     const workspace = join(root, 'project-local', TASK_ID)
     expect(existsSync(join(workspace, 'original.pdf'))).toBe(true)
     expect(existsSync(join(workspace, 'work-context.json'))).toBe(true)
-    expect(existsSync(join(workspace, 'drafts', 'translation.json'))).toBe(true)
+    expect(existsSync(join(workspace, 'drafts', 'translation', 'draft.json'))).toBe(true)
     expect(statSync(join(workspace, 'assets')).isDirectory()).toBe(true)
     expect(existsSync(join(root, 'runtime-local', TASK_ID))).toBe(false)
 
-    const draft = JSON.parse(readFileSync(join(workspace, 'drafts', 'translation.json'), 'utf8')) as { paragraphs: string[] }
+    const draft = JSON.parse(readFileSync(join(workspace, 'drafts', 'translation', 'draft.json'), 'utf8')) as { paragraphs: string[] }
     expect(draft.paragraphs.length).toBeGreaterThan(0)
     expect(draft.paragraphs[0]?.includes('样例')).toBe(true)
     expect(JSON.stringify(draft)).not.toContain('complete')

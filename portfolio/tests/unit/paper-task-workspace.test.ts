@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { afterEach, describe, expect, it } from 'vitest'
 import { existsSync, readFileSync, readdirSync, statSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -43,8 +44,10 @@ describe('paper-task workspace layout', () => {
     expect(new Uint8Array(readFileSync(paths.originalPath))).toEqual(PDF_BYTES)
     expect(statSync(paths.draftsDir).isDirectory()).toBe(true)
     expect(statSync(paths.assetsDir).isDirectory()).toBe(true)
-    expect(readdirSync(paths.draftsDir)).toEqual([])
-    expect(readdirSync(root).sort()).toEqual(['assets', 'drafts', ORIGINAL_PDF_NAME])
+    expect(readdirSync(paths.draftsDir).sort()).toEqual(['deep-reading', 'translation'])
+    expect(readdirSync(paths.branchDirectories.translation)).toEqual(['pieces'])
+    expect(readdirSync(paths.branchDirectories['deep-reading'])).toEqual(['pieces'])
+    expect(readdirSync(root).sort()).toEqual(['assets', 'drafts', ORIGINAL_PDF_NAME, 'source-records'])
   })
 
   it('persists a minimal work context and per-branch drafts', () => {
@@ -58,7 +61,9 @@ describe('paper-task workspace layout', () => {
       taskId: '123e4567-e89b-12d3-a456-426614174000',
       selection: 'both',
       pageCount: 2,
-      sourceExcerpt: '摘要内容',
+      sourceRecordsDir: paths.sourceRecordsDir,
+      assetsDir: paths.assetsDir,
+      sourceStatePath: paths.sourceStatePath,
     })
     saveDraft(root, 'translation', { designation: 'sample', paragraphs: ['样例段落'] })
     saveDraft(root, 'deep-reading', { designation: 'sample', paragraphs: ['深读样例'] })
@@ -69,10 +74,13 @@ describe('paper-task workspace layout', () => {
       taskId: '123e4567-e89b-12d3-a456-426614174000',
       selection: 'both',
       pageCount: 2,
-      sourceExcerpt: '摘要内容',
+      sourceRecordsDir: paths.sourceRecordsDir,
+      assetsDir: paths.assetsDir,
+      sourceStatePath: paths.sourceStatePath,
     })
-    expect(readdirSync(paths.draftsDir).sort()).toEqual(['deep-reading.json', 'translation.json'])
-    expect(JSON.parse(readFileSync(join(paths.draftsDir, 'translation.json'), 'utf8'))).toEqual({
+    expect(readdirSync(paths.branchDirectories.translation).sort()).toEqual(['draft.json', 'pieces'])
+    expect(readdirSync(paths.branchDirectories['deep-reading']).sort()).toEqual(['draft.json', 'pieces'])
+    expect(JSON.parse(readFileSync(join(paths.branchDirectories.translation, 'draft.json'), 'utf8'))).toEqual({
       designation: 'sample',
       paragraphs: ['样例段落'],
     })
@@ -88,7 +96,7 @@ describe('paper-task workspace layout', () => {
     saveDraft(root, 'translation', { paragraphs: ['第二版'] })
 
     // Then: only the latest payload is retained.
-    const payload = JSON.parse(readFileSync(join(workspacePaths(root).draftsDir, 'translation.json'), 'utf8'))
+    const payload = JSON.parse(readFileSync(join(workspacePaths(root).branchDirectories.translation, 'draft.json'), 'utf8'))
     expect(payload).toEqual({ paragraphs: ['第二版'] })
   })
 
