@@ -29,7 +29,7 @@ export type PaperTaskBranch = (typeof PAPER_TASK_BRANCHES)[number]
 export const PAPER_TASK_STAGES = ['preparing', 'generating', 'cleaning'] as const
 export type PaperTaskStage = (typeof PAPER_TASK_STAGES)[number]
 
-export const PAPER_TASK_STATES = ['not-selected', 'pending', 'running', 'sample-ready', 'failed', 'cancelled'] as const
+export const PAPER_TASK_STATES = ['not-selected', 'pending', 'running', 'sample-ready', 'preview-ready', 'failed', 'cancelled'] as const
 export type PaperTaskState = (typeof PAPER_TASK_STATES)[number]
 
 export const PAPER_TASK_OUTCOMES = ['succeeded', 'failed', 'cancelled', 'disconnected'] as const
@@ -37,7 +37,7 @@ export type PaperTaskOutcome = (typeof PAPER_TASK_OUTCOMES)[number]
 
 /** Designations a preview may carry. `sample` means unfinished; there is no
  * `complete` or `passed` designation on the wire. */
-export const PAPER_TASK_DESIGNATIONS = ['sample'] as const
+export const PAPER_TASK_DESIGNATIONS = ['sample', 'generated-preview'] as const
 export type PaperTaskDesignation = (typeof PAPER_TASK_DESIGNATIONS)[number]
 
 /** Per-preview paragraph bounds shared by the backend and the frontend. */
@@ -134,10 +134,10 @@ const branchStatesSchema = z.object({
  * cancel may land on a task whose sibling branch already failed.
  */
 const PAPER_TASK_TERMINAL_STATE_RULES: Record<PaperTaskOutcome, ReadonlySet<PaperTaskState>> = {
-  succeeded: new Set(['sample-ready', 'not-selected']),
-  failed: new Set(['failed', 'sample-ready', 'not-selected']),
-  cancelled: new Set(['cancelled', 'failed', 'sample-ready', 'not-selected']),
-  disconnected: new Set(['cancelled', 'failed', 'sample-ready', 'not-selected']),
+  succeeded: new Set(['sample-ready', 'preview-ready', 'not-selected']),
+  failed: new Set(['failed', 'sample-ready', 'preview-ready', 'not-selected']),
+  cancelled: new Set(['cancelled', 'failed', 'sample-ready', 'preview-ready', 'not-selected']),
+  disconnected: new Set(['cancelled', 'failed', 'sample-ready', 'preview-ready', 'not-selected']),
 }
 
 const terminalEventSchema = z.object({

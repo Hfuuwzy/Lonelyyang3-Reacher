@@ -24,6 +24,7 @@ import {
 export type PaperTaskRuntimeEvent =
   | { readonly type: 'progress'; readonly stage: PaperTaskStage; readonly completed: number; readonly total: number }
   | PaperTaskWorkerPreview
+  | { readonly type: 'generated-preview'; readonly markdown: string; readonly paragraphs: readonly string[] }
 
 export type PaperTaskBranchResult = { readonly ok: true } | { readonly ok: false }
 export type PaperTaskCloseResult = { readonly ok: true } | { readonly ok: false }
@@ -67,9 +68,16 @@ const runtimeProgressSchema = z.object({
   total: z.number().int().positive(),
 }).passthrough()
 
-const runtimeEventSchema = z.discriminatedUnion('type', [
+const generatedPreviewSchema = z.object({
+  type: z.literal('generated-preview'),
+  markdown: z.string().min(1).max(200000),
+  paragraphs: z.array(z.string().min(1).max(2000)).min(1).max(8),
+}).strict()
+
+const runtimeEventSchema = z.union([
   runtimeProgressSchema,
   workerPreviewSchema,
+  generatedPreviewSchema,
 ])
 
 /** Max bytes on a single runtime event line, so a bad child cannot exhaust memory. */
