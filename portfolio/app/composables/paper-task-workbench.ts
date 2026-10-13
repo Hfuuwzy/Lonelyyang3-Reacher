@@ -160,7 +160,7 @@ export function usePaperTaskWorkbench(options: PaperTaskWorkbenchOptions = {}): 
         if (result.data.code === 'not-found') {
           state.fail('任务在服务端已不存在，无法停止。')
         } else {
-          state.fail('停止时清理失败；已生成的样例与已保存的资料保留在任务工作区中。')
+              state.fail('停止时清理失败；已生成的样例、预览与已保存资料保留在任务工作区中。')
         }
       }
     } catch (error) {
@@ -205,7 +205,7 @@ export function usePaperTaskWorkbench(options: PaperTaskWorkbenchOptions = {}): 
       if (result.data.code === 'not-found') {
         state.fail('任务在服务端已不存在，无法删除。')
       } else {
-        state.fail('删除前清理失败，任务资料已保留；已生成的样例预览不受影响。')
+        state.fail('删除前清理失败，任务资料已保留；已生成的样例与文本预览不受影响。')
       }
     } catch (error) {
       if (isStale(run)) {

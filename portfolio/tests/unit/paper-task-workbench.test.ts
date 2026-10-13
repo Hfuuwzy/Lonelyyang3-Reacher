@@ -34,6 +34,14 @@ const TRANSLATION_PREVIEW: PaperTaskEvent = {
   paragraphs: ['服务端提供的样例译文。'],
 }
 
+const GENERATED_TRANSLATION_PREVIEW: PaperTaskEvent = {
+  type: 'preview',
+  taskId: TASK_ID,
+  branch: 'translation',
+  designation: 'generated-preview',
+  paragraphs: ['服务端提供的未完成文本预览。'],
+}
+
 const SUCCESSFUL_TERMINAL: PaperTaskEvent = {
   type: 'terminal',
   taskId: TASK_ID,
@@ -223,6 +231,50 @@ describe('paper-task workbench', () => {
     await submission
 
     expect(harness.workbench.terminalTitle.value).toBe('样例任务结束')
+    expect(harness.workbench.previewCards.value[0]?.badge).toBe('SAMPLE')
+  })
+
+  it('keeps generated text previews distinct from samples', async () => {
+    // Given a task that emits one generated preview and one sample.
+    const harness = createHarness()
+    const submission = harness.workbench.handleSubmit()
+    harness.emit(ACCEPTED)
+    harness.emit(GENERATED_TRANSLATION_PREVIEW)
+    harness.emit({
+      type: 'preview',
+      taskId: TASK_ID,
+      branch: 'deep-reading',
+      designation: 'sample',
+      paragraphs: ['服务端提供的深读样例。'],
+    })
+
+    // When the mixed preview stream reaches its terminal event.
+    const terminal: PaperTaskEvent = {
+      type: 'terminal',
+      taskId: TASK_ID,
+      outcome: 'succeeded',
+      branches: { translation: 'preview-ready', 'deep-reading': 'sample-ready' },
+      cleanup: 'clean',
+    }
+    harness.emit(terminal)
+    harness.resolveSubmission({ kind: 'stream', outcome: { kind: 'terminal', terminal } })
+    await submission
+
+    // Then the generated preview has its own designation, status, and unfinished badge.
+    expect(harness.workbench.previewCards.value.map((card) => ({
+      designation: card.designation,
+      headingLabel: card.headingLabel,
+      badge: card.badge,
+    }))).toEqual([
+      {
+        designation: 'generated-preview',
+        headingLabel: '文本预览',
+        badge: '文本预览 · 未完成 · 未经质量检查',
+      },
+      { designation: 'sample', headingLabel: '样例', badge: 'SAMPLE' },
+    ])
+    expect(harness.workbench.stateLabel(harness.workbench.branchStates.value.translation)).toBe('文本预览就绪')
+    expect(harness.workbench.terminalTitle.value).toBe('文本预览任务结束')
   })
 
   it('keeps a streamed preview visible during running and after network EOF', async () => {

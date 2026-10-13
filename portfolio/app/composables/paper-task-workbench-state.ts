@@ -4,6 +4,7 @@ import {
   initialBranchStates,
   type PaperTaskBranch,
   type PaperTaskBranches,
+  type PaperTaskDesignation,
   type PaperTaskEvent,
   type PaperTaskOutcome,
   type PaperTaskSelection,
@@ -18,6 +19,9 @@ export interface PaperTaskSelectionOption {
 
 export interface PaperTaskPreviewCard {
   readonly branch: PaperTaskBranch
+  readonly designation: PaperTaskDesignation
+  readonly headingLabel: string
+  readonly badge: string
   readonly paragraphs: readonly string[]
 }
 
@@ -65,6 +69,14 @@ const BRANCH_LABELS: Record<PaperTaskBranch, string> = {
   'deep-reading': '深读',
 }
 
+const PREVIEW_PRESENTATION: Record<PaperTaskDesignation, { readonly headingLabel: string; readonly badge: string }> = {
+  sample: { headingLabel: '样例', badge: 'SAMPLE' },
+  'generated-preview': {
+    headingLabel: '文本预览',
+    badge: '文本预览 · 未完成 · 未经质量检查',
+  },
+}
+
 const STAGE_LABELS: Record<PaperTaskStage, string> = {
   preparing: '准备',
   generating: '生成',
@@ -76,6 +88,7 @@ const STATE_LABELS: Record<PaperTaskState, string> = {
   pending: '等待中',
   running: '进行中',
   'sample-ready': '样例就绪',
+  'preview-ready': '文本预览就绪',
   failed: '失败',
   cancelled: '已取消',
 }
@@ -88,10 +101,10 @@ const OUTCOME_TITLES: Record<PaperTaskOutcome, string> = {
 }
 
 const OUTCOME_SUMMARIES: Record<PaperTaskOutcome, string> = {
-  succeeded: '所选分支均已生成样例（SAMPLE）。样例未完成且未经质量检查，不构成成品、完整译文或质量通过声明。',
-  failed: '部分分支失败；未选择的分支不受影响。其余分支样例与已保存的资料保留在任务工作区中。',
-  cancelled: '任务已停止，未完成的分支标为已取消。已生成的样例与已保存的资料保留在任务工作区中。',
-  disconnected: '连接中断，未完成的分支标为已取消。已生成的样例与已保存的资料保留在任务工作区中。',
+  succeeded: '所选分支均有可读预览。样例或文本预览均未完成且未经质量检查，不代表成品、内容完整或质量通过。',
+  failed: '部分分支失败；未选择的分支不受影响。其余分支的预览与已保存资料保留在任务工作区中。',
+  cancelled: '任务已停止，未完成的分支标为已取消。已收到的样例、预览与已保存资料保留在任务工作区中。',
+  disconnected: '连接中断，未完成的分支标为已取消。已收到的样例、预览与已保存资料保留在任务工作区中。',
 }
 
 export function createPaperTaskWorkbenchState(): PaperTaskWorkbenchStateController {
@@ -135,7 +148,24 @@ export function createPaperTaskWorkbenchState(): PaperTaskWorkbenchStateControll
 
   const terminalTitle = computed(() => {
     const current = terminal.value
-    return current !== null && current.type === 'terminal' ? OUTCOME_TITLES[current.outcome] : ''
+    if (current === null || current.type !== 'terminal') {
+      return ''
+    }
+    switch (current.outcome) {
+      case 'succeeded':
+        return current.branches.translation === 'preview-ready'
+          || current.branches['deep-reading'] === 'preview-ready'
+          ? '文本预览任务结束'
+          : OUTCOME_TITLES.succeeded
+      case 'failed':
+      case 'cancelled':
+      case 'disconnected':
+        return OUTCOME_TITLES[current.outcome]
+      default: {
+        const exhaustive: never = current.outcome
+        throw new Error(`unreachable paper task outcome: ${String(exhaustive)}`)
+      }
+    }
   })
 
   const terminalSummary = computed(() => {
@@ -145,7 +175,7 @@ export function createPaperTaskWorkbenchState(): PaperTaskWorkbenchStateControll
     }
     const cleanupNote = current.cleanup === 'clean'
       ? ''
-      : ' 运行时清理失败；仅影响临时运行目录，已保存的资料、样例与工作区不受影响。'
+      : ' 运行时清理失败；仅影响临时运行目录，已保存的资料、预览与工作区不受影响。'
     return OUTCOME_SUMMARIES[current.outcome] + cleanupNote
   })
 
@@ -153,7 +183,17 @@ export function createPaperTaskWorkbenchState(): PaperTaskWorkbenchStateControll
     const selected = activeSelection.value ?? selection.value
     return getSelectedBranches(selected).flatMap((branch) => {
       const preview = previews.value[branch]
-      return preview === undefined ? [] : [{ branch, paragraphs: preview.paragraphs }]
+      if (preview === undefined) {
+        return []
+      }
+      const presentation = PREVIEW_PRESENTATION[preview.designation]
+      return [{
+        branch,
+        designation: preview.designation,
+        headingLabel: presentation.headingLabel,
+        badge: presentation.badge,
+        paragraphs: preview.paragraphs,
+      }]
     })
   })
 
@@ -162,16 +202,28 @@ export function createPaperTaskWorkbenchState(): PaperTaskWorkbenchStateControll
       case 'accepted':
         taskId.value = event.taskId
         return
-      case 'progress':
+      case 'progress': {
         progress.value = { stage: event.stage, branch: event.branch, completed: event.completed, total: event.total }
-        if (event.branch !== null && cumulativeBranchStates.value[event.branch] !== 'sample-ready') {
+        const currentState = event.branch === null ? null : cumulativeBranchStates.value[event.branch]
+        if (event.branch !== null && currentState !== 'sample-ready' && currentState !== 'preview-ready') {
           cumulativeBranchStates.value = { ...cumulativeBranchStates.value, [event.branch]: 'running' }
         }
         return
+      }
       case 'preview':
         previews.value = { ...previews.value, [event.branch]: event }
-        cumulativeBranchStates.value = { ...cumulativeBranchStates.value, [event.branch]: 'sample-ready' }
-        return
+        switch (event.designation) {
+          case 'sample':
+            cumulativeBranchStates.value = { ...cumulativeBranchStates.value, [event.branch]: 'sample-ready' }
+            return
+          case 'generated-preview':
+            cumulativeBranchStates.value = { ...cumulativeBranchStates.value, [event.branch]: 'preview-ready' }
+            return
+          default: {
+            const exhaustive: never = event.designation
+            throw new Error(`unreachable paper task designation: ${String(exhaustive)}`)
+          }
+        }
       case 'terminal':
         return
       default: {
