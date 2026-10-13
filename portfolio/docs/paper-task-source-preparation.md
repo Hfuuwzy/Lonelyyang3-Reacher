@@ -1,6 +1,6 @@
 # Paper-task source preparation
 
-This guide describes the local, sample-only PDF source preparation available on the prototype paper-task route. It is a preparation and correction surface, not a generated paper intermediate.
+This guide describes the local PDF source preparation and correction available on the prototype paper-task route. Text generation previews are documented separately in [Paper-task text generation](paper-task-generation.md).
 
 ## Current behavior
 
@@ -8,7 +8,7 @@ This guide describes the local, sample-only PDF source preparation available on 
 - The record kinds include body, heading, appendix, footnote, reference, table, formula, and algorithm. Selectable text is not translated, interpreted, or rebuilt into a paper.
 - Table, formula, and algorithm source crops can be rendered as original PNG assets. Each asset carries page and bounding-box metadata and `understanding: unverified`. `available` means the PNG exists and passed basic asset checks, not that a model or person understood it.
 - Gaps record pages without recoverable selectable text; ambiguous records flag extraction that needs review. These are not repaired automatically.
-- The UI allows translation, deep-reading, or both branches, but currently shows sample previews from original extracted text. Previews are marked SAMPLE, incomplete, and not quality-checked. They are not translations or deep-reading reports.
+- A task may select translation, deep-reading, or both. The injectable sample runtime still shows unfinished original-text samples; the default service launches the pinned DSH runtime and shows natural Markdown as an unfinished `generated-preview`. Neither form is complete or quality-checked.
 
 ## Controlled fixture
 
@@ -47,8 +47,8 @@ A successful change returns 200 and advances the global revision. A stale revisi
 ## Retention, isolation, and limits
 
 - Retained project-local task files remain until manual task deletion. There is no TTL, task history, recovery after server restart, correction history, provenance manifest, or human-original intermediate.
-- Branch runtimes can read shared source material but write only their own branch workspace. A Node 24 trusted-code guard limits the local runtime; it is not a hostile-code sandbox.
-- Extraction relies on selectable PDF text and layout heuristics. It does not promise full-paper translation, deep reading, export, or visual model understanding. Actual generation, regeneration, and model understanding are later work for issues 43, 44, and 45.
+- Branch runtimes read shared source material and write only their own branch workspace through controlled task tools. The fixed DSH composition omits shell tools; this is not a hostile-code sandbox for the trusted local Harness process.
+- Extraction relies on selectable PDF text and layout heuristics. The text-generation preview does not promise full-paper translation, a complete deep-reading report, export, or visual model understanding. A controlled real-provider text run is recorded in the generation guide; real PDF/image endpoint acceptance and subsequent quality work remain outstanding.
 
 ## Verification record
 
