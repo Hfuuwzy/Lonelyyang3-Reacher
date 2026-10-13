@@ -60,6 +60,7 @@ export function createPaperTaskSourceStore() {
       writeFileSync(join(paths.sourceRecordsDir, `${record.id}.json`), JSON.stringify(stored))
       records.set(record.id, stored)
     }
+    writeFileSync(join(paths.root, 'source-index.json'), JSON.stringify(source.records.map((record) => record.id)))
     const assetEntries = new Map<string, AssetEntry>()
     for (const asset of assets) {
       const record = records.get(asset.recordId)?.record
