@@ -17,6 +17,11 @@
 - Playwright E2E is opt-in: run it only when the user explicitly asks for E2E/Playwright tests. When requested, select only affected spec files or cases with a path or title filter; run the unfiltered full suite only when the user explicitly asks for the full E2E suite.
 - Add or update focused tests when a behavior needs a maintained regression guard. Keep distinct useful coverage; retire or consolidate cases only when the behavior is removed or coverage is genuinely redundant, not merely because a test passed once.
 
+## Development model calls
+
+- The user authorizes agents to call models configured in `portfolio/.env` and `portfolio/.env.test.local` as needed to implement, debug, and verify this project's features, including paid calls. Do not ask again solely for permission to use these configured models or incur their API costs.
+- Load credentials directly through local application or test runners. Keep credentials out of tool output, logs, retained task materials, documentation, and commits; report sanitized results and clean up owned runtime processes after verification.
+
 ## Browser Automation
 
 - Read `docs/browser-automation-runbook.md` before starting any browser workflow.
