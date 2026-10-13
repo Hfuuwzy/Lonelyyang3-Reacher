@@ -88,6 +88,10 @@ export function saveDraft(root: string, branch: PaperTaskBranch, payload: unknow
   writeFileSync(join(workspacePaths(root).branchDirectories[branch], 'draft.json'), JSON.stringify(payload))
 }
 
+export function saveGeneratedPreview(root: string, branch: PaperTaskBranch, markdown: string): void {
+  writeFileSync(join(workspacePaths(root).branchDirectories[branch], 'preview.md'), markdown, { mode: 0o600 })
+}
+
 export function saveDraftPiece(root: string, branch: PaperTaskBranch, piece: DraftPieceMetadata): void {
   const directory = join(workspacePaths(root).branchDirectories[branch], 'pieces')
   mkdirSync(directory, { recursive: true })

@@ -23,9 +23,13 @@ import {
   removePaperTaskWorkspace,
 } from './workspace'
 import {
-  createSampleProcessRuntimeFactory,
   type PaperTaskRuntimeFactory,
 } from './runtime'
+import { createDshRuntimeFactory } from './dsh-runtime'
+import { getPaperTaskProviderSettings } from './provider-settings'
+import { getSelectedBranches } from '../../app/utils/paper-task-contract'
+import { snapshotGenerationResources } from './generation-resources'
+import { writeTaskInput } from './input'
 import { finalizeHandle, makeHandle, requestStop, type PaperTaskHandle } from './handle'
 import {
   createTaskEvents,
@@ -35,6 +39,7 @@ import { correctPaperTaskSource, type PaperTaskCorrection, type PaperTaskCorrect
 
 const SAFE_CREATE_MESSAGE = '任务工作区创建失败，请稍后重试。'
 const SAFE_SELECTION_MESSAGE = '任务分支选择不受支持，请选择翻译、深读或两者。'
+const SAFE_PROVIDER_MESSAGE = '请先配置论文任务的模型提供方、接口协议和模型，再提交生成预览。'
 
 export interface PaperTaskServiceDependencies {
   readonly runtimeFactory?: PaperTaskRuntimeFactory
@@ -59,7 +64,7 @@ export interface PaperTaskService {
 export function createPaperTaskService(
   dependencies: PaperTaskServiceDependencies = {},
 ): PaperTaskService {
-  const runtimeFactory = dependencies.runtimeFactory ?? createSampleProcessRuntimeFactory()
+  const runtimeFactory = dependencies.runtimeFactory
   const prepareSource = dependencies.prepareSource ?? defaultPrepareSource
   const createId = dependencies.createId ?? (() => randomUUID())
   const projectRoot = dependencies.projectRoot ?? resolve(process.cwd(), '.data', 'paper-tasks')
@@ -82,9 +87,35 @@ export function createPaperTaskService(
     const taskId = createId()
     const retainedRoot = workspaceRoot(taskId)
     const runtimeRoot = join(projectRoot, 'runtime-local', taskId)
+    const provider = runtimeFactory === undefined ? getPaperTaskProviderSettings() : undefined
+    if (runtimeFactory === undefined && (provider === undefined || provider.providerLabel.length === 0 || provider.baseUrl.length === 0 || provider.model.length === 0)) {
+      return { ok: false, statusCode: 400, message: SAFE_PROVIDER_MESSAGE }
+    }
     try {
       createPaperTaskWorkspace(retainedRoot, input.pdf)
     } catch {
+      return { ok: false, statusCode: 500, message: SAFE_CREATE_MESSAGE }
+    }
+
+    let taskRuntimeFactory = runtimeFactory
+    let unavailableBranches: readonly ('translation' | 'deep-reading')[] = []
+    if (provider !== undefined) {
+      try {
+        const selected = getSelectedBranches(selection.data)
+        const resourceSnapshot = snapshotGenerationResources(retainedRoot, selected)
+        unavailableBranches = resourceSnapshot.unavailableBranches
+        const taskInputPath = writeTaskInput(retainedRoot, taskId, selection.data)
+        taskRuntimeFactory = createDshRuntimeFactory({
+          provider,
+          workspaceRoot: retainedRoot,
+          taskInputPath,
+          resourcesRoot: join(retainedRoot, 'generation-resources'),
+        })
+      } catch {
+        return { ok: false, statusCode: 500, message: SAFE_CREATE_MESSAGE }
+      }
+    }
+    if (taskRuntimeFactory === undefined) {
       return { ok: false, statusCode: 500, message: SAFE_CREATE_MESSAGE }
     }
 
@@ -93,7 +124,7 @@ export function createPaperTaskService(
     return {
       ok: true,
       taskId,
-      events: createTaskEvents(handle, input, runtimeFactory, prepareSource, sourceStore),
+      events: createTaskEvents(handle, input, taskRuntimeFactory, prepareSource, sourceStore, unavailableBranches),
     }
   }
 

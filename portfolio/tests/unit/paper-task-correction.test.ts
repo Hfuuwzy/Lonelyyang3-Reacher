@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createPaperTaskService } from '../../server/paper-task/coordinator'
+import { createSampleProcessRuntimeFactory } from '../../server/paper-task/runtime'
 import type { PaperTaskSourceResult } from '../../app/utils/paper-task-source-contract'
 import type { PaperTaskSelection } from '../../app/utils/paper-task-contract'
 
@@ -30,7 +31,7 @@ afterEach(() => {
 async function completedTask(selection: PaperTaskSelection = 'both') {
   const root = mkdtempSync(join(tmpdir(), 'paper-task-correction-'))
   roots.push(root)
-  const service = createPaperTaskService({ projectRoot: root, createId: () => ID, prepareSource: async () => prepared })
+  const service = createPaperTaskService({ projectRoot: root, createId: () => ID, prepareSource: async () => prepared, runtimeFactory: createSampleProcessRuntimeFactory() })
   const result = await service.submit({ pdf: new Uint8Array([37, 80, 68, 70]), selection })
   if (!result.ok) throw new Error('fixture task rejected')
   for await (const _event of result.events) {}
@@ -120,7 +121,7 @@ describe('paper task source corrections', () => {
   it('rejects correction before the submitted stream starts without cancelling it', async () => {
     const root = mkdtempSync(join(tmpdir(), 'paper-task-before-start-'))
     roots.push(root)
-    const service = createPaperTaskService({ projectRoot: root, createId: () => ID, prepareSource: async () => prepared })
+    const service = createPaperTaskService({ projectRoot: root, createId: () => ID, prepareSource: async () => prepared, runtimeFactory: createSampleProcessRuntimeFactory() })
     const submitted = await service.submit({ pdf: new Uint8Array([37, 80, 68, 70]), selection: 'translation' })
     if (!submitted.ok) throw new Error('fixture task rejected')
     expect(service.correctSource(ID, correction('p1-r1', 'Changed.'))).toEqual({ kind: 'unavailable' })

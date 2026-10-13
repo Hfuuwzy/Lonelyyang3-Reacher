@@ -23,6 +23,7 @@ export function createTaskEvents(
   runtimeFactory: PaperTaskRuntimeFactory,
   prepareSource: PreparePaperTaskSource,
   sourceStore: ReturnType<typeof createPaperTaskSourceStore>,
+  unavailableBranches: readonly PaperTaskBranch[] = [],
 ): AsyncIterable<PaperTaskEvent> {
   const queue = new EventQueue<{ readonly kind: 'event'; readonly event: PaperTaskEvent }>()
   const branchQueue = new EventQueue()
@@ -35,7 +36,7 @@ export function createTaskEvents(
       return
     }
     handle.started = true
-    producer = produceTask(handle, input, runtimeFactory, prepareSource, sourceStore, queue, branchQueue, runners, () => suppressTerminal)
+    producer = produceTask(handle, input, runtimeFactory, prepareSource, sourceStore, queue, branchQueue, runners, () => suppressTerminal, unavailableBranches)
   }
 
   return {
@@ -59,7 +60,7 @@ export function createTaskEvents(
           requestStop(handle, 'disconnect')
           if (producer === undefined) {
             handle.started = true
-            producer = produceTask(handle, input, runtimeFactory, prepareSource, sourceStore, queue, branchQueue, runners, () => true)
+            producer = produceTask(handle, input, runtimeFactory, prepareSource, sourceStore, queue, branchQueue, runners, () => true, unavailableBranches)
           }
           await handle.settled
           return { done: true, value: undefined }
@@ -79,6 +80,7 @@ async function produceTask(
   branchQueue: EventQueue,
   runners: Promise<void>[],
   suppressTerminal: () => boolean,
+  unavailableBranches: readonly PaperTaskBranch[],
 ): Promise<void> {
   const selected = getSelectedBranches(input.selection)
   let outcome: PaperTaskOutcome = 'succeeded'
@@ -115,8 +117,13 @@ async function produceTask(
     const sourceRecords = sourceStore.records(handle.taskId, handle.workspaceRoot)
     if (sourceRecords === undefined) throw new Error('prepared source unavailable')
     const sourceReadPaths = sourceStore.workerReadPaths(handle.taskId, handle.workspaceRoot)
-    const doneBranches = new Set<PaperTaskBranch>()
+    const doneBranches = new Set<PaperTaskBranch>(unavailableBranches)
+    for (const branch of unavailableBranches) {
+      handle.branches[branch] = 'failed'
+      handle.anyFailed = true
+    }
     for (const branch of selected) {
+      if (unavailableBranches.includes(branch)) continue
       if (handle.controller.signal.aborted) {
         break
       }
@@ -148,7 +155,7 @@ async function produceTask(
         continue
       }
       doneBranches.add(item.branch)
-      handle.branches[item.branch] = item.ok ? 'sample-ready' : 'failed'
+      handle.branches[item.branch] = item.ok ? item.state : 'failed'
       handle.anyFailed ||= !item.ok
     }
   } catch {
@@ -182,7 +189,7 @@ function markUnfinished(
   state: 'cancelled' | 'failed' | 'sample-ready',
 ): void {
   for (const branch of selected) {
-    if (branches[branch] !== 'sample-ready' && branches[branch] !== 'failed') {
+    if (branches[branch] !== 'sample-ready' && branches[branch] !== 'preview-ready' && branches[branch] !== 'failed') {
       branches[branch] = state
     }
   }

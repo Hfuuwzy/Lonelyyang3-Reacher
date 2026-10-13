@@ -3,7 +3,7 @@ import type { PaperTaskHandle } from './handle'
 import { closeRuntime } from './handle'
 import type { PaperTaskRuntime } from './runtime'
 import type { EventQueue } from './queue'
-import { saveDraft, saveDraftPiece } from './workspace'
+import { saveDraft, saveDraftPiece, saveGeneratedPreview } from './workspace'
 import { validateWorkerPreview } from './source-pieces'
 
 export type PaperTaskBranchRun = {
@@ -18,6 +18,7 @@ export async function runPaperTaskBranch(run: PaperTaskBranchRun): Promise<void>
   const { handle, branch, runtime, queue, sourceRecords } = run
   let ok = false
   let sawPreview = false
+  let state: 'sample-ready' | 'preview-ready' = 'sample-ready'
   try {
     const events = runtime.events()[Symbol.asyncIterator]()
     while (!handle.controller.signal.aborted) {
@@ -27,6 +28,11 @@ export async function runPaperTaskBranch(run: PaperTaskBranchRun): Promise<void>
       if (event.type === 'progress') {
         queue.push({ kind: 'event', event: { type: 'progress', taskId: handle.taskId, branch,
           stage: event.stage, completed: event.completed, total: event.total } })
+      } else if (event.type === 'generated-preview') {
+        saveGeneratedPreview(handle.workspaceRoot, branch, event.markdown)
+        sawPreview = true
+        state = 'preview-ready'
+        queue.push({ kind: 'event', event: { type: 'preview', taskId: handle.taskId, branch, designation: 'generated-preview', paragraphs: [...event.paragraphs] } })
       } else {
         const validated = validateWorkerPreview(event, branch, sourceRecords)
         if (validated === undefined) throw new Error('preview dependencies invalid')
@@ -45,10 +51,10 @@ export async function runPaperTaskBranch(run: PaperTaskBranchRun): Promise<void>
   } catch {
     ok = false
   } finally {
-    if (ok) handle.branches[branch] = 'sample-ready'
+    if (ok) handle.branches[branch] = state
     else if (!handle.controller.signal.aborted) handle.branches[branch] = 'failed'
     void closeRuntime(handle, runtime)
-    queue.push({ kind: 'done', branch, ok })
+    queue.push({ kind: 'done', branch, ok, state })
   }
 }
 
