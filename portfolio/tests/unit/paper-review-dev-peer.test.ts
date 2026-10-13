@@ -87,6 +87,28 @@ describe('paper-task dev peer attestation', () => {
     )
   })
 
+  it.each(['GET', 'PUT', 'DELETE'])('attests %s for independent paper-task provider settings', async (method) => {
+    const { event, req } = makeEvent({
+      method,
+      url: '/api/prototype/paper-task-settings',
+      remoteAddress: '::1',
+      headers: { host: HOST, origin: ORIGIN },
+    })
+    await createDevPeerParentHandler(TEST_KEY)(event)
+    expect(req.headers[PAPER_REVIEW_DEV_PEER_HEADER]).toBe('::1')
+  })
+
+  it('does not attest similarly named provider settings paths', async () => {
+    const { event, req } = makeEvent({
+      method: 'GET',
+      url: '/api/prototype/paper-task-settings/extra',
+      remoteAddress: '::1',
+      headers: { host: HOST, origin: ORIGIN },
+    })
+    await createDevPeerParentHandler(TEST_KEY)(event)
+    expect(req.headers[PAPER_REVIEW_DEV_PEER_HEADER]).toBeUndefined()
+  })
+
   it('attests the paper-task cancel POST for an exact UUID', async () => {
     const { event, req } = makeEvent({
       method: 'POST',
