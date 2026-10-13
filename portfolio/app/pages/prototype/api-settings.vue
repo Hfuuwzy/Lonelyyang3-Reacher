@@ -3,17 +3,16 @@
     <PaperSectionHeading
       stamp="原型"
       english="API SETTINGS"
-      title="API 设置原型"
-      description="按用户自带凭证（BYOK）的单栏流式界面结构试验，不含任何真实凭证处理。"
+      title="论文任务 API 设置"
+      description="为之后启动的论文任务配置本机提供方；更改设置不会影响正在运行的任务。"
     />
 
-    <PrototypeNotice />
-
-    <PrototypeFlow />
+    <PaperTaskApiSettings />
   </section>
 </template>
 
 <script setup lang="ts">
+import PaperTaskApiSettings from '~/components/prototype/PaperTaskApiSettings.vue'
 import PaperSectionHeading from '~/components/content/PaperSectionHeading.vue'
 
 definePageMeta({ layout: 'default' })

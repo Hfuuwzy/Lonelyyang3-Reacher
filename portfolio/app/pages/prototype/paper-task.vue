@@ -2,14 +2,17 @@
   <section class="paper-task" aria-labelledby="paper-task-title">
     <header class="paper-task__heading">
       <p class="paper-task__stamp" aria-hidden="true">原型</p>
-      <h1 id="paper-task-title" class="paper-task__title">论文任务工作台<small>（SAMPLE 预览）</small></h1>
+      <h1 id="paper-task-title" class="paper-task__title">论文任务工作台<small>（受控文本预览）</small></h1>
       <p class="paper-task__lede">
-        单篇 PDF 的本地原型：选择翻译、深读或两者，任务只启动所选分支并分别呈现进度与样例。
+        单篇 PDF 选择翻译、深读或两者，任务只启动所选分支。此原型固定使用 DSH 0.1.7-rc.2，范围仅限文本预览。
         仅通过开发服务器提供，不属于生产站点内容。
       </p>
       <p class="paper-task__note">
-        样例预览取自所上传论文的原文摘录，由本地流程提供；不调用模型，也不是真实生成的译文或深读报告。
+        卡片会区分 SAMPLE 与生成文本预览。预览未完成且未经质量检查，不代表翻译准确、内容完整或质量通过；本票不发送图像。
       </p>
+      <NuxtLink class="paper-task__settings-link" :to="localePath('/prototype/api-settings')">
+        论文任务 API 设置
+      </NuxtLink>
     </header>
 
     <form v-if="phase === 'idle' || phase === 'result'" class="paper-task__form" @submit.prevent="handleSubmit">
@@ -98,8 +101,8 @@
 
     <article v-for="preview in previewCards" :key="preview.branch" class="paper-task__preview">
       <header class="paper-task__preview-heading">
-        <h3>{{ branchLabel(preview.branch) }} 样例</h3>
-        <p class="paper-task__preview-badge">SAMPLE · 未完成 · 未经质量检查</p>
+        <h3>{{ branchLabel(preview.branch) }} {{ preview.headingLabel }}</h3>
+        <p class="paper-task__preview-badge" :data-designation="preview.designation">{{ preview.badge }}</p>
       </header>
       <p v-for="(paragraph, index) in preview.paragraphs" :key="index" class="paper-task__preview-paragraph">
         {{ paragraph }}
@@ -143,6 +146,7 @@ const {
   stateLabel,
 } = usePaperTaskWorkbench()
 
+const localePath = useLocalePath()
 const allBranches = computed(() => PAPER_TASK_BRANCHES)
 
 function onPdfChange(event: Event): void {
@@ -154,3 +158,26 @@ function onPdfChange(event: Event): void {
 </script>
 
 <style scoped src="~/assets/css/paper-task.css"></style>
+
+<style scoped>
+.paper-task__settings-link {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 2.75rem;
+  margin-block-start: 0.5rem;
+  color: var(--ink);
+  font-family: var(--font-mincho);
+  text-decoration: underline;
+  text-decoration-color: var(--rule);
+  text-underline-offset: 0.2em;
+}
+
+.paper-task__settings-link:hover {
+  text-decoration-color: var(--ink);
+}
+
+.paper-task__settings-link:focus-visible {
+  outline: 3px solid var(--vermilion);
+  outline-offset: 2px;
+}
+</style>
