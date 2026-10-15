@@ -33,6 +33,14 @@ type AssetEntry = {
   readonly path: string
 }
 
+type RetainedSourceAsset = {
+  readonly id: string
+  readonly recordId: string
+  readonly availability: PublicSourceAsset['availability']
+  readonly understanding: 'unverified'
+  readonly relativePath: string | null
+}
+
 type SourceState = {
   readonly root: string
   readonly recordsDir: string
@@ -47,6 +55,16 @@ const RECORD_ID_PATTERN = /^p\d+-r\d+$/
 const ASSET_ID_PATTERN = /^asset-[0-9a-f]{32}$/
 const MAX_ASSET_BYTES = 8 * 1024 * 1024
 const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10] as const
+
+function retainedAsset(publicAsset: PublicSourceAsset): RetainedSourceAsset {
+  return {
+    id: publicAsset.id,
+    recordId: publicAsset.recordId,
+    availability: publicAsset.availability,
+    understanding: publicAsset.understanding,
+    relativePath: publicAsset.availability === 'available' ? `../../assets/${publicAsset.id}.png` : null,
+  }
+}
 
 export function createPaperTaskSourceStore() {
   const tasks = new Map<string, SourceState>()
@@ -79,6 +97,7 @@ export function createPaperTaskSourceStore() {
       status: source.status,
       pageCount: source.pageCount,
       revision: 1,
+      assets: [...assetEntries.values()].map(({ publicAsset }) => retainedAsset(publicAsset)),
     }))
     tasks.set(taskId, { root, recordsDir: paths.sourceRecordsDir, source, revision: 1, records, assets: assetEntries, available: true })
   }
@@ -147,6 +166,7 @@ export function createPaperTaskSourceStore() {
         status: nextSource.status,
         pageCount: nextSource.pageCount,
         revision: nextRevision,
+        assets: [...state.assets.values()].map(({ publicAsset }) => retainedAsset(publicAsset)),
       }))
       state.source = nextSource
       state.revision = nextRevision
