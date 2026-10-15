@@ -144,11 +144,14 @@ class DshPaperTaskRuntime implements PaperTaskRuntime {
     const runTimer = setTimeout(() => { void this.close() }, 180000)
     try {
       if (signal?.aborted) return []
-      const prompt = `You are generating only the ${this.branch} branch. Call paper_task_read_input with no arguments first. Read the complete pinned branch SKILL.md, then the original source records and required references with the supplied tools. Continue paged reads at nextOffset until totalBytes. Save an unfinished natural Markdown preview with paper_task_write_branch and the identifiers of every source record read. Do not call any other tools.`
+      const prompt = this.branch === 'deep-reading'
+        ? 'You are generating only the deep-reading branch. Call paper_task_read_input with no arguments first and follow its whole-paper task instructions. Read the complete pinned deep-reading SKILL.md and a suitable required framework reference, then discover and read every original source record completely with the supplied tools. Continue paged reads at nextOffset until totalBytes. Synthesize a connected natural Markdown report from the whole paper; include required claim_evidence entries that distinguish facts from inferences and link important passages to known verbatim source quotes. Save it as an unfinished preview with paper_task_write_branch and the identifiers of every source record read. Do not call any other tools.'
+        : `You are generating only the ${this.branch} branch. Call paper_task_read_input with no arguments first. Read the complete pinned branch SKILL.md, then the original source records and required references with the supplied tools. Continue paged reads at nextOffset until totalBytes. Save an unfinished natural Markdown preview with paper_task_write_branch and the identifiers of every source record read. Do not call any other tools.`
       const run = this.harness.run(prompt)
       const outcome = await Promise.race([run, aborted])
       if (outcome === undefined || signal?.aborted) return []
-      const markdown = readFileSync(join(this.branchRoot, 'preview.md'), 'utf8')
+      const markdown = readFileSync(join(this.branchRoot, this.branch === 'deep-reading' ? 'report.md' : 'preview.md'), 'utf8')
+      if (this.branch === 'deep-reading' && readFileSync(join(this.branchRoot, 'preview.md'), 'utf8') !== markdown) return []
       if (!hasSuccessfulBranchWrite(outcome, markdown)) return []
       const paragraphs = markdown.split(/\n\s*\n/).map((part) => part.trim())
         .filter((part) => part.length > 0).slice(0, 8).map((part) => part.slice(0, 2000))
