@@ -1,9 +1,9 @@
-import { createHash, randomUUID } from 'node:crypto'
-import { constants, realpathSync } from 'node:fs'
-import { lstat, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { isAbsolute, relative, resolve, sep } from 'node:path'
+import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { readBytes, readPage, writeOwnedFile } from './controlled-files.mjs'
 
 const cliEntry = process.argv[1]
 if (cliEntry === undefined) throw new Error('paper task tools require the DSH CLI module context')
@@ -55,30 +55,7 @@ export function apply(ctx) {
 
   const sourceReads = new Map()
   const resourceReads = new Map()
-  const contained = async (root, path) => {
-    const actualRoot = await realpath(root)
-    const actualPath = await realpath(path)
-    assertContained(actualRoot, actualPath)
-    return actualPath
-  }
-  const readBytes = async (root, path, maxBytes) => {
-    const actualPath = await contained(root, path)
-    if ((await lstat(actualPath)).size > maxBytes) throw new Error('paper task file exceeds its read limit')
-    const bytes = await readFile(actualPath)
-    if (bytes.byteLength > maxBytes) throw new Error('paper task file exceeds its read limit')
-    return bytes
-  }
-  const readPage = async (root, path, offset, maxBytes, maxFileBytes) => {
-    assertPage(offset, maxBytes)
-    const bytes = await readBytes(root, path, maxFileBytes)
-    if (offset > bytes.byteLength) throw new Error('page offset is outside the file')
-    let start = offset
-    while (start < bytes.byteLength && (bytes[start] & 0xc0) === 0x80) start++
-    let end = Math.min(start + maxBytes, bytes.byteLength)
-    while (end > start && end < bytes.byteLength && (bytes[end] & 0xc0) === 0x80) end--
-    const nextOffset = end
-    return { bytes, page: JSON.stringify({ offset: start, nextOffset, totalBytes: bytes.byteLength, text: bytes.subarray(start, end).toString('utf8') }), start, end }
-  }
+  let sourceIndexRead
   const define = (spec) => ctx.tools.register(defineTool(spec))
   const disposers = []
 
@@ -101,7 +78,15 @@ export function apply(ctx) {
       const offset = args.offset ?? 0
       const limit = args.limit ?? 50
       if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('source page limits are invalid')
-      return JSON.stringify({ offset, nextOffset: Math.min(offset + limit, ids.length), totalItems: ids.length, items: ids.slice(offset, offset + limit) })
+      const nextOffset = Math.min(offset + limit, ids.length)
+      sourceIndexRead = trackItems(sourceIndexRead, offset, nextOffset, ids.length, hash(bytes))
+      const result = { offset, nextOffset, totalItems: ids.length, items: ids.slice(offset, nextOffset) }
+      if (branch === 'deep-reading') {
+        const state = JSON.parse((await readBytes(taskRoot, resolve(taskRoot, 'source-state.json'), MAX_INDEX_BYTES)).toString('utf8'))
+        result.status = state.status
+        result.assets = state.assets.filter((asset) => result.items.includes(asset.recordId))
+      }
+      return JSON.stringify(result)
     },
   }))
   disposers.push(define({
@@ -157,11 +142,15 @@ export function apply(ctx) {
     description: 'Save an unfinished Markdown preview to this branch only.',
     parameters: {
       markdown: { type: 'string', required: true },
-      source_record_ids: { type: 'array', required: true, description: 'Every completely read source record used for this preview.', items: { type: 'string' } },
+      source_record_ids: { type: 'array', required: true, description: branch === 'deep-reading' ? 'Every indexed source record, all completely read, used by this report.' : 'Every completely read source record used for this preview.', items: { type: 'string' } },
+      ...(branch === 'deep-reading' ? {
+        claim_evidence: { type: 'array', required: true, description: 'For each important report passage: exact passage substring, fact/inference kind, source record id, verbatim quote, and inference explanation when applicable.', items: { type: 'object', additionalProperties: false, properties: { passage: { type: 'string', required: true }, kind: { type: 'string', enum: ['fact', 'inference'], required: true }, source_record_id: { type: 'string', required: true }, quote: { type: 'string', required: true }, explanation: { type: 'string' } } } },
+        uncompleted_reasons: { type: 'array', description: 'Internal reasons why essential source material remains unavailable or unverified.', items: { type: 'string' } },
+      } : {}),
     },
     output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
     async execute(args) {
-      if (args.markdown.length === 0 || Buffer.byteLength(args.markdown, 'utf8') > MAX_INPUT_BYTES) throw new Error('branch preview exceeds the allowed output size')
+      if (typeof args.markdown !== 'string' || args.markdown.trim().length === 0 || Buffer.byteLength(args.markdown, 'utf8') > MAX_INPUT_BYTES) throw new Error('branch preview exceeds the allowed output size')
       const skillId = `${branch}:SKILL.md`
       const skillRead = resourceReads.get(skillId)
       if (skillRead?.complete !== true) throw new Error('read the complete pinned branch skill before saving a preview')
@@ -169,11 +158,14 @@ export function apply(ctx) {
       const skillEntry = resourceEntries.find((entry) => entry.id === skillId)
       if (skillEntry === undefined || skillRead.sha256 !== skillEntry.sha256
         || hash(await readBytes(resourceRoot, resolve(resourceRoot, `${skillId.replaceAll(':', '--')}`), MAX_INPUT_BYTES)) !== skillEntry.sha256) throw new Error('pinned branch skill changed after it was read')
-      const sourceIds = parseDependencies(args.source_record_ids, sourceReads)
+      const sourceIds = branch === 'deep-reading' ? args.source_record_ids : parseDependencies(args.source_record_ids, sourceReads)
       const indexBytes = await readBytes(taskRoot, resolve(taskRoot, 'source-index.json'), MAX_INDEX_BYTES)
       const indexedIds = JSON.parse(indexBytes.toString('utf8'))
-      if (!Array.isArray(indexedIds) || sourceIds.some((id) => !indexedIds.includes(id))) throw new Error('source dependency is unavailable')
+      if (!Array.isArray(indexedIds) || indexedIds.some((id) => typeof id !== 'string' || !RECORD_ID_PATTERN.test(id)) || new Set(indexedIds).size !== indexedIds.length) throw new Error('source index is invalid')
+      if (!Array.isArray(sourceIds) || sourceIds.length === 0 || new Set(sourceIds).size !== sourceIds.length || sourceIds.some((id) => !indexedIds.includes(id))) throw new Error('source dependency is unavailable')
+      if (branch === 'deep-reading' && (sourceIndexRead?.complete !== true || sourceIndexRead.sha256 !== hash(indexBytes) || indexedIds.some((id) => sourceReads.get(id)?.complete !== true) || sourceIds.length !== indexedIds.length || indexedIds.some((id) => !sourceIds.includes(id)))) throw new Error('deep reading requires complete index discovery and every indexed source record')
       const records = []
+      const storedSources = []
       for (const recordId of sourceIds) {
         if (sourceReads.get(recordId)?.complete !== true) throw new Error('read each source dependency completely before saving a preview')
         const sourceBytes = await readBytes(sourceRoot, resolve(sourceRoot, `${recordId}.json`), MAX_INDEX_BYTES)
@@ -181,6 +173,19 @@ export function apply(ctx) {
         const stored = JSON.parse(sourceBytes.toString('utf8'))
         if (stored.record?.id !== recordId || !Number.isInteger(stored.revision) || stored.revision < 1) throw new Error('source record is unavailable')
         records.push({ id: `${branch}-${recordId}`, dependencies: [{ recordId, revision: stored.revision }], stale: false })
+        storedSources.push(stored)
+      }
+      if (branch === 'deep-reading') {
+        const frameworkEntries = resourceEntries.filter((entry) => entry.id.startsWith('deep-reading:references:'))
+        const usedFramework = frameworkEntries.find((entry) => resourceReads.get(entry.id)?.complete === true)
+        if (usedFramework === undefined) throw new Error('read a complete pinned analysis framework before saving a deep-reading report')
+        const frameworkBytes = await readBytes(resourceRoot, resolve(resourceRoot, usedFramework.id.replaceAll(':', '--').replaceAll('/', '--')), MAX_INPUT_BYTES)
+        if (hash(frameworkBytes) !== usedFramework.sha256 || resourceReads.get(usedFramework.id)?.sha256 !== usedFramework.sha256) throw new Error('pinned analysis framework changed after it was read')
+        const { validateDeepReadingReport } = await import('./deep-reading-report.mjs')
+        const state = JSON.parse((await readBytes(taskRoot, resolve(taskRoot, 'source-state.json'), MAX_INDEX_BYTES)).toString('utf8'))
+        const evidence = validateDeepReadingReport(args, { records: storedSources, state })
+        await writeOwnedFile(branchRoot, 'report.md', args.markdown)
+        await writeOwnedFile(branchRoot, 'evidence.json', JSON.stringify(evidence))
       }
       await writeOwnedFile(branchRoot, 'preview.md', args.markdown)
       for (const record of records) await writeOwnedFile(piecesRoot, `${record.id}.json`, JSON.stringify(record))
@@ -188,15 +193,6 @@ export function apply(ctx) {
     },
   }))
   ctx.effect(() => () => { for (const dispose of disposers.reverse()) dispose() })
-}
-
-function assertContained(root, path) {
-  const pathFromRoot = relative(root, path)
-  if (pathFromRoot === '..' || pathFromRoot.startsWith(`..${sep}`) || isAbsolute(pathFromRoot)) throw new Error('paper task path is outside the assigned directory')
-}
-
-function assertPage(offset, limit) {
-  if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 4 || limit > PAGE_BYTES) throw new Error('page limits are invalid: use offset >= 0 and limit_bytes from 4 to 20000, or omit both for the first page')
 }
 
 function trackRead(reads, id, start, end, total, sha256) {
@@ -213,8 +209,19 @@ function trackRead(reads, id, start, end, total, sha256) {
   reads.set(id, { ranges, complete: covered >= total, sha256 })
 }
 
+function trackItems(previous, start, end, total, sha256) {
+  if (previous !== undefined && (previous.sha256 !== sha256 || previous.total !== total)) throw new Error('source index changed between pages')
+  const ranges = [...(previous?.ranges ?? []), [start, end]].sort((left, right) => left[0] - right[0])
+  let covered = 0
+  for (const [from, to] of ranges) {
+    if (from > covered) break
+    covered = Math.max(covered, to)
+  }
+  return { ranges, complete: covered >= total, total, sha256 }
+}
+
 function parseDependencies(ids, reads) {
-  if (ids.length === 0 || ids.length > MAX_RECORD_DEPENDENCIES || new Set(ids).size !== ids.length || ids.some((id) => typeof id !== 'string' || !RECORD_ID_PATTERN.test(id) || !reads.has(id))) throw new Error('source dependency list is invalid')
+  if (!Array.isArray(ids) || ids.length === 0 || ids.length > MAX_RECORD_DEPENDENCIES || new Set(ids).size !== ids.length || ids.some((id) => typeof id !== 'string' || !RECORD_ID_PATTERN.test(id) || !reads.has(id))) throw new Error('source dependency list is invalid')
   const readIds = [...reads].filter(([, value]) => value.complete).map(([id]) => id)
   if (readIds.some((id) => !ids.includes(id)) || ids.some((id) => reads.get(id)?.complete !== true)) throw new Error('source dependencies must match completely read records')
   return ids
@@ -234,27 +241,4 @@ function parseResourceIndex(text, branch) {
 
 function hash(bytes) {
   return createHash('sha256').update(bytes).digest('hex')
-}
-
-async function writeOwnedFile(directory, filename, contents) {
-  const outputDirectory = await realpath(directory)
-  const path = resolve(outputDirectory, filename)
-  if (relative(outputDirectory, path).startsWith('..') || isAbsolute(relative(outputDirectory, path))) throw new Error('branch output path is invalid')
-  try {
-    const details = await lstat(path)
-    if (details.isSymbolicLink() || !details.isFile()) throw new Error('branch output path is invalid')
-    assertContained(outputDirectory, await realpath(path))
-  } catch (error) {
-    if (!(error instanceof Error) || !('code' in error) || error.code !== 'ENOENT') throw error
-  }
-  const temporary = resolve(outputDirectory, `.${filename}.${randomUUID()}.tmp`)
-  try {
-    await writeFile(temporary, contents, { encoding: 'utf8', flag: constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), mode: 0o600 })
-    await rename(temporary, path)
-  } catch (error) {
-    try { await unlink(temporary) } catch (cleanupError) {
-      if (!(cleanupError instanceof Error) || !('code' in cleanupError) || cleanupError.code !== 'ENOENT') throw cleanupError
-    }
-    throw error
-  }
 }
