@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { readBytes, readPage, writeOwnedFile } from './controlled-files.mjs'
+import { publishTranslationMaster } from './translation-publication.mjs'
 
 const cliEntry = process.argv[1]
 if (cliEntry === undefined) throw new Error('paper task tools require the DSH CLI module context')
@@ -14,7 +15,7 @@ const { defineTool } = await import(dshToolsUrl.href)
 const RECORD_ID_PATTERN = /^p\d{1,10}-r\d{1,10}$/
 const RESOURCE_ID_PATTERN = /^(translation|deep-reading):[A-Za-z0-9_:.\/-]+\.md$/
 const PAGE_BYTES = 20000, MAX_INPUT_BYTES = 200000, MAX_INDEX_BYTES = 2000000
-const MAX_RESOURCE_INDEX_BYTES = 64000, MAX_RECORD_DEPENDENCIES = 200
+const MAX_RESOURCE_INDEX_BYTES = 64000
 const PAGE_PARAMETERS = {
   offset: { type: 'integer', description: 'Nonnegative UTF-8 byte offset. Start at 0, then use nextOffset from the preceding page.' },
   limit_bytes: { type: 'integer', description: 'Page size from 4 to 20000 bytes. Omit for the default 20000 bytes.' },
@@ -81,11 +82,9 @@ export function apply(ctx) {
       const nextOffset = Math.min(offset + limit, ids.length)
       sourceIndexRead = trackItems(sourceIndexRead, offset, nextOffset, ids.length, hash(bytes))
       const result = { offset, nextOffset, totalItems: ids.length, items: ids.slice(offset, nextOffset) }
-      if (branch === 'deep-reading') {
-        const state = JSON.parse((await readBytes(taskRoot, resolve(taskRoot, 'source-state.json'), MAX_INDEX_BYTES)).toString('utf8'))
-        result.status = state.status
-        result.assets = state.assets.filter((asset) => result.items.includes(asset.recordId))
-      }
+      const state = JSON.parse((await readBytes(taskRoot, resolve(taskRoot, 'source-state.json'), MAX_INDEX_BYTES)).toString('utf8'))
+      result.assets = state.assets.filter((asset) => result.items.includes(asset.recordId))
+      if (branch === 'deep-reading') result.status = state.status
       return JSON.stringify(result)
     },
   }))
@@ -139,18 +138,35 @@ export function apply(ctx) {
   }))
   disposers.push(define({
     name: 'paper_task_write_branch',
-    description: 'Save an unfinished Markdown preview to this branch only.',
+    description: branch === 'translation'
+      ? 'Save the complete unfinished Chinese translation master as natural Markdown segments, plus its source coverage, terminology, and unresolved-material notes.'
+      : 'Save an unfinished whole-paper deep-reading report to this branch only.',
     parameters: {
-      markdown: { type: 'string', required: true },
-      source_record_ids: { type: 'array', required: true, description: branch === 'deep-reading' ? 'Every indexed source record, all completely read, used by this report.' : 'Every completely read source record used for this preview.', items: { type: 'string' } },
-      ...(branch === 'deep-reading' ? {
+      ...(branch === 'translation' ? {
+        segments: {
+          type: 'array', required: true,
+          description: 'Natural Chinese Markdown blocks in article order. Each block may cover several source records; do not use a fixed article template or bilingual pairs.',
+          items: { type: 'object', additionalProperties: false, properties: {
+            markdown: { type: 'string', required: true, description: 'One or more natural paragraphs of the master, without source-position markers.' },
+            source_record_ids: { type: 'array', required: true, description: 'Every source record this block draws on.', items: { type: 'string' } },
+          } },
+        },
+        terminology: { type: 'array', description: 'Key term choices that must stay consistent across the whole master.', items: { type: 'object', additionalProperties: false, properties: { source: { type: 'string', required: true }, target: { type: 'string', required: true } } } },
+        unresolved: { type: 'array', description: 'Necessary material that is missing, ambiguous, or unrecoverable. Do not guess replacement content.', items: { type: 'object', additionalProperties: false, properties: { record_id: { type: 'string', required: true }, reason: { type: 'string', required: true } } } },
+      } : {
+        markdown: { type: 'string', required: true },
+        source_record_ids: { type: 'array', required: true, description: 'Every indexed source record, all completely read, used by this report.', items: { type: 'string' } },
         claim_evidence: { type: 'array', required: true, description: 'For each important report passage: exact passage substring, fact/inference kind, source record id, verbatim quote, and inference explanation when applicable.', items: { type: 'object', additionalProperties: false, properties: { passage: { type: 'string', required: true }, kind: { type: 'string', enum: ['fact', 'inference'], required: true }, source_record_id: { type: 'string', required: true }, quote: { type: 'string', required: true }, explanation: { type: 'string' } } } },
         uncompleted_reasons: { type: 'array', description: 'Internal reasons why essential source material remains unavailable or unverified.', items: { type: 'string' } },
-      } : {}),
+      }),
     },
     output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
     async execute(args) {
-      if (typeof args.markdown !== 'string' || args.markdown.trim().length === 0 || Buffer.byteLength(args.markdown, 'utf8') > MAX_INPUT_BYTES) throw new Error('branch preview exceeds the allowed output size')
+      if (branch === 'translation') {
+        if (typeof args.markdown === 'string') throw new Error('translation must be saved as natural segments, not one bounded preview string')
+      } else if (typeof args.markdown !== 'string' || args.markdown.trim().length === 0 || Buffer.byteLength(args.markdown, 'utf8') > MAX_INPUT_BYTES) {
+        throw new Error('branch preview exceeds the allowed output size')
+      }
       const skillId = `${branch}:SKILL.md`
       const skillRead = resourceReads.get(skillId)
       if (skillRead?.complete !== true) throw new Error('read the complete pinned branch skill before saving a preview')
@@ -158,12 +174,15 @@ export function apply(ctx) {
       const skillEntry = resourceEntries.find((entry) => entry.id === skillId)
       if (skillEntry === undefined || skillRead.sha256 !== skillEntry.sha256
         || hash(await readBytes(resourceRoot, resolve(resourceRoot, `${skillId.replaceAll(':', '--')}`), MAX_INPUT_BYTES)) !== skillEntry.sha256) throw new Error('pinned branch skill changed after it was read')
-      const sourceIds = branch === 'deep-reading' ? args.source_record_ids : parseDependencies(args.source_record_ids, sourceReads)
       const indexBytes = await readBytes(taskRoot, resolve(taskRoot, 'source-index.json'), MAX_INDEX_BYTES)
       const indexedIds = JSON.parse(indexBytes.toString('utf8'))
       if (!Array.isArray(indexedIds) || indexedIds.some((id) => typeof id !== 'string' || !RECORD_ID_PATTERN.test(id)) || new Set(indexedIds).size !== indexedIds.length) throw new Error('source index is invalid')
+      if (branch === 'translation') {
+        return publishTranslationMaster({ args, taskRoot, sourceRoot, branchRoot, indexedIds, sourceReads, sourceIndexRead, indexBytes })
+      }
+      const sourceIds = args.source_record_ids
       if (!Array.isArray(sourceIds) || sourceIds.length === 0 || new Set(sourceIds).size !== sourceIds.length || sourceIds.some((id) => !indexedIds.includes(id))) throw new Error('source dependency is unavailable')
-      if (branch === 'deep-reading' && (sourceIndexRead?.complete !== true || sourceIndexRead.sha256 !== hash(indexBytes) || indexedIds.some((id) => sourceReads.get(id)?.complete !== true) || sourceIds.length !== indexedIds.length || indexedIds.some((id) => !sourceIds.includes(id)))) throw new Error('deep reading requires complete index discovery and every indexed source record')
+      if (sourceIndexRead?.complete !== true || sourceIndexRead.sha256 !== hash(indexBytes) || indexedIds.some((id) => sourceReads.get(id)?.complete !== true) || sourceIds.length !== indexedIds.length || indexedIds.some((id) => !sourceIds.includes(id))) throw new Error('deep reading requires complete index discovery and every indexed source record')
       const records = []
       const storedSources = []
       for (const recordId of sourceIds) {
@@ -175,7 +194,7 @@ export function apply(ctx) {
         records.push({ id: `${branch}-${recordId}`, dependencies: [{ recordId, revision: stored.revision }], stale: false })
         storedSources.push(stored)
       }
-      if (branch === 'deep-reading') {
+      {
         const frameworkEntries = resourceEntries.filter((entry) => entry.id.startsWith('deep-reading:references:'))
         const usedFramework = frameworkEntries.find((entry) => resourceReads.get(entry.id)?.complete === true)
         if (usedFramework === undefined) throw new Error('read a complete pinned analysis framework before saving a deep-reading report')
@@ -218,13 +237,6 @@ function trackItems(previous, start, end, total, sha256) {
     covered = Math.max(covered, to)
   }
   return { ranges, complete: covered >= total, total, sha256 }
-}
-
-function parseDependencies(ids, reads) {
-  if (!Array.isArray(ids) || ids.length === 0 || ids.length > MAX_RECORD_DEPENDENCIES || new Set(ids).size !== ids.length || ids.some((id) => typeof id !== 'string' || !RECORD_ID_PATTERN.test(id) || !reads.has(id))) throw new Error('source dependency list is invalid')
-  const readIds = [...reads].filter(([, value]) => value.complete).map(([id]) => id)
-  if (readIds.some((id) => !ids.includes(id)) || ids.some((id) => reads.get(id)?.complete !== true)) throw new Error('source dependencies must match completely read records')
-  return ids
 }
 
 function parseResourceIndex(text, branch) {

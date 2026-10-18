@@ -46,18 +46,23 @@ describe('paper task controlled tools', () => {
     await expect(fixture.tools.paper_task_read_resource({ resource_id: 'translation:SKILL.md' }))
       .rejects.toThrow('paper task file exceeds its read limit')
   })
-  it('reads full multibyte skill and source content through bounded pages before saving a preview', async () => {
+  it('reads full multibyte skill and source content through bounded pages before saving a master', async () => {
     const fixture = setup({ skill: `---\nname: academic-paper-zh-translation\nversion: 1.1.0\n---\n${'学'.repeat(5000)}`, source: { text: '证'.repeat(5000) } })
     const tools = fixture.tools
     const skillText = await readAllPages((offset) => tools.paper_task_read_resource({ resource_id: 'translation:SKILL.md', offset, limit_bytes: 12000 }))
     const sourceText = await readAllPages((offset) => tools.paper_task_read_source({ record_id: 'p1-r0', offset, limit_bytes: 12000 }))
+    await tools.paper_task_list_sources({ offset: 0, limit: 100 })
     expect(skillText).toBe(fixture.skill)
     expect(sourceText).toBe(fixture.sourceText)
-    const saved = await tools.paper_task_write_branch({ markdown: '# Unfinished preview', source_record_ids: ['p1-r0'] })
+    const master = `# 未完成译文\n\n${'证'.repeat(1400)}`
+    const saved = await tools.paper_task_write_branch({ segments: [{ markdown: master, source_record_ids: ['p1-r0'] }] })
     expect(saved).toBe('Branch preview saved.')
-    expect(readFileSync(join(fixture.branchRoot, 'preview.md'), 'utf8')).toBe('# Unfinished preview')
-    expect(JSON.parse(readFileSync(join(fixture.branchRoot, 'pieces', 'translation-p1-r0.json'), 'utf8'))).toEqual({
-      id: 'translation-p1-r0', dependencies: [{ recordId: 'p1-r0', revision: 3 }], stale: false,
+    expect(readFileSync(join(fixture.branchRoot, 'master.md'), 'utf8')).toBe(master)
+    expect(readFileSync(join(fixture.branchRoot, 'preview.md'), 'utf8')).toBe(master)
+    expect(JSON.parse(readFileSync(join(fixture.branchRoot, 'translation.json'), 'utf8'))).toMatchObject({
+      status: 'complete',
+      sourceRevision: 1,
+      segments: [{ index: 0, stale: false, dependencies: [{ recordId: 'p1-r0', revision: 3 }] }],
     })
   })
 
@@ -65,10 +70,18 @@ describe('paper task controlled tools', () => {
     const fixture = setup()
     await readAllPages((offset) => fixture.tools.paper_task_read_resource({ resource_id: 'translation:SKILL.md', offset, limit_bytes: 12000 }))
     await fixture.tools.paper_task_read_source({ record_id: 'p1-r0' })
-    await expect(fixture.tools.paper_task_write_branch({ markdown: '# Invalid', source_record_ids: ['p99-r1'] }))
-      .rejects.toThrow('source dependency list is invalid')
+    await fixture.tools.paper_task_list_sources({ offset: 0, limit: 100 })
+    await expect(fixture.tools.paper_task_write_branch({ segments: [{ markdown: '# Invalid', source_record_ids: ['p99-r1'] }] }))
+      .rejects.toThrow('unknown or duplicate source records')
     expect(() => readFileSync(join(fixture.branchRoot, 'preview.md'))).toThrow()
-    expect(() => readFileSync(join(fixture.branchRoot, 'pieces', 'translation-p1-r0.json'))).toThrow()
+  })
+
+  it('rejects saving a master before the complete source index was discovered', async () => {
+    const fixture = setup()
+    await readAllPages((offset) => fixture.tools.paper_task_read_resource({ resource_id: 'translation:SKILL.md', offset, limit_bytes: 12000 }))
+    await fixture.tools.paper_task_read_source({ record_id: 'p1-r0' })
+    await expect(fixture.tools.paper_task_write_branch({ segments: [{ markdown: '# 未完成译文', source_record_ids: ['p1-r0'] }] }))
+      .rejects.toThrow('complete index discovery')
   })
 
   it('pages the complete source index and rejects oversized page requests', async () => {
@@ -76,8 +89,8 @@ describe('paper task controlled tools', () => {
     writeFileSync(join(fixture.taskRoot, 'source-index.json'), JSON.stringify(['p1-r0', 'p1-r1', 'p1-r2']))
     const first = JSON.parse(await fixture.tools.paper_task_list_sources({ offset: 0, limit: 2 }))
     const second = JSON.parse(await fixture.tools.paper_task_list_sources({ offset: first.nextOffset, limit: 2 }))
-    expect(first).toEqual({ offset: 0, nextOffset: 2, totalItems: 3, items: ['p1-r0', 'p1-r1'] })
-    expect(second).toEqual({ offset: 2, nextOffset: 3, totalItems: 3, items: ['p1-r2'] })
+    expect(first).toEqual({ offset: 0, nextOffset: 2, totalItems: 3, items: ['p1-r0', 'p1-r1'], assets: [] })
+    expect(second).toEqual({ offset: 2, nextOffset: 3, totalItems: 3, items: ['p1-r2'], assets: [] })
     await expect(fixture.tools.paper_task_list_sources({ offset: 0, limit: 101 })).rejects.toThrow('source page limits are invalid')
   })
 
@@ -114,7 +127,7 @@ describe('paper task controlled tools', () => {
     const fixture = setup()
     await expect(fixture.tools.paper_task_read_resource({ resource_id: 'deep-reading:SKILL.md' }))
       .rejects.toThrow('unsupported resource identifier')
-    await expect(fixture.tools.paper_task_write_branch({ markdown: '# Too early', source_record_ids: [] }))
+    await expect(fixture.tools.paper_task_write_branch({ segments: [{ markdown: '# Too early', source_record_ids: [] }] }))
       .rejects.toThrow('read the complete pinned branch skill')
     await expect(fixture.tools.paper_task_read_source({ record_id: 'p1-r0/../../outside' }))
       .rejects.toThrow('unsupported source record identifier')
@@ -137,11 +150,12 @@ function setup(options: { readonly branch?: 'translation' | 'deep-reading'; read
   const skill = options.skill ?? '---\nname: academic-paper-zh-translation\nversion: 1.1.0\n---\nPinned skill.'
   const resourceBytes = Buffer.from(skill)
   const source = options.source ?? { text: 'Original text.' }
-  const storedSource = { record: { id: 'p1-r0', text: source.text }, revision: 3 }
+  const storedSource = { record: { id: 'p1-r0', kind: 'body', state: 'present', text: source.text }, revision: 3 }
   const sourceText = JSON.stringify(storedSource)
   const resourceId = `${branch}:SKILL.md`
   writeFileSync(join(root, 'task-input.md'), '# Instructions')
   writeFileSync(join(root, 'source-index.json'), JSON.stringify(['p1-r0']))
+  writeFileSync(join(root, 'source-state.json'), JSON.stringify({ status: 'complete', revision: 1, assets: [] }))
   writeFileSync(join(sourceRoot, 'p1-r0.json'), sourceText)
   writeFileSync(join(resourceRoot, resourceId.replaceAll(':', '--')), resourceBytes)
   writeFileSync(join(resourceRoot, 'index.json'), JSON.stringify([{
@@ -185,7 +199,7 @@ function setup(options: { readonly branch?: 'translation' | 'deep-reading'; read
     paper_task_read_source: (args: { readonly record_id: string; readonly offset?: number; readonly limit_bytes?: number }) => invoke('paper_task_read_source', args),
     paper_task_list_resources: () => invoke('paper_task_list_resources', {}),
     paper_task_list_sources: (args: { readonly offset?: number; readonly limit?: number }) => invoke('paper_task_list_sources', args),
-    paper_task_write_branch: (args: { readonly markdown: string; readonly source_record_ids: readonly string[] }) => invoke('paper_task_write_branch', args),
+    paper_task_write_branch: (args: object) => invoke('paper_task_write_branch', args),
   }
   return { taskRoot, branchRoot, resourceId, skill, sourceText, tools }
 }
