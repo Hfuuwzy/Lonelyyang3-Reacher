@@ -7,6 +7,7 @@ export const PAPER_TASK_PROVIDER_PROTOCOLS = [
   'openai-responses',
   'anthropic-messages',
 ] as const
+export type PaperTaskProviderProtocol = (typeof PAPER_TASK_PROVIDER_PROTOCOLS)[number]
 
 export const paperTaskProviderSettingsSchema = z.object({
   providerLabel: z.string().trim().min(1).max(80),
@@ -20,6 +21,7 @@ export const paperTaskProviderSettingsSchema = z.object({
   }),
   protocol: z.enum(PAPER_TASK_PROVIDER_PROTOCOLS),
   model: z.string().trim().min(1).max(128),
+  imageInput: z.boolean().default(false),
   apiKey: z.string().max(4096).default(''),
 }).strict()
 
@@ -31,6 +33,7 @@ export const paperTaskProviderPublicStatusSchema = z.object({
   baseUrl: z.string().optional(),
   protocol: z.enum(PAPER_TASK_PROVIDER_PROTOCOLS).optional(),
   model: z.string().optional(),
+  imageInput: z.boolean(),
   apiKeyConfigured: z.boolean(),
 }).strict()
 

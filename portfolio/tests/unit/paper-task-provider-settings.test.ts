@@ -12,6 +12,7 @@ const validSettings = {
   baseUrl: 'https://api.example.test/v1',
   protocol: 'openai-completions',
   model: 'model-a',
+  imageInput: false,
   apiKey: 'secret-value',
 } as const
 afterEach(clearPaperTaskProviderSettings)
@@ -19,6 +20,7 @@ afterEach(clearPaperTaskProviderSettings)
 describe('paper-task provider settings', () => {
   it('parses bounded configurations and rejects URL credentials', () => {
     expect(paperTaskProviderSettingsSchema.safeParse(validSettings).success).toBe(true)
+    expect(paperTaskProviderSettingsSchema.parse({ ...validSettings, imageInput: undefined }).imageInput).toBe(false)
     expect(paperTaskProviderSettingsSchema.safeParse({ ...validSettings, baseUrl: 'https://user:pass@example.test' }).success).toBe(false)
     expect(paperTaskProviderSettingsSchema.safeParse({ ...validSettings, protocol: 'unknown' }).success).toBe(false)
   })

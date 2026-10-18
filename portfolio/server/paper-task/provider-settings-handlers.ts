@@ -42,13 +42,14 @@ export function createPaperTaskProviderSettingsHandlers(dev: boolean): {
     requirePaperTaskProviderSettingsAccess(event, dev)
     setResponseHeader(event, 'cache-control', 'no-store')
     const settings = getPaperTaskProviderSettings()
-    if (settings === undefined) return { configured: false, apiKeyConfigured: false }
+    if (settings === undefined) return { configured: false, imageInput: false, apiKeyConfigured: false }
     return {
       configured: true,
       providerLabel: settings.providerLabel,
       baseUrl: settings.baseUrl,
       protocol: settings.protocol,
       model: settings.model,
+      imageInput: settings.imageInput,
       apiKeyConfigured: settings.apiKey.length > 0,
     }
   })
@@ -71,14 +72,14 @@ export function createPaperTaskProviderSettingsHandlers(dev: boolean): {
     const settings = paperTaskProviderSettingsSchema.safeParse(payload)
     if (!settings.success) throw createError({ statusCode: 400, message: '提供方设置字段无效。' })
     replacePaperTaskProviderSettings(settings.data)
-    return { configured: true, apiKeyConfigured: settings.data.apiKey.length > 0 }
+    return { configured: true, imageInput: settings.data.imageInput, apiKeyConfigured: settings.data.apiKey.length > 0 }
   })
 
   const remove = defineEventHandler((event) => {
     requirePaperTaskProviderSettingsAccess(event, dev)
     setResponseHeader(event, 'cache-control', 'no-store')
     clearPaperTaskProviderSettings()
-    return { configured: false, apiKeyConfigured: false }
+    return { configured: false, imageInput: false, apiKeyConfigured: false }
   })
 
   return { get, put, delete: remove }

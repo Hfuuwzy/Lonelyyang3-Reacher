@@ -139,7 +139,7 @@ describe('paper-task provider settings HTTP routes', () => {
     await handlers.put(makeEvent('PUT', { body: validBody }))
     const event = makeEvent('DELETE')
     const result = await handlers.delete(event)
-    expect(result).toEqual({ configured: false, apiKeyConfigured: false })
+    expect(result).toEqual({ configured: false, imageInput: false, apiKeyConfigured: false })
     expect(JSON.stringify(result)).not.toContain('secret-marker')
     expect(event.node.res.getHeader('cache-control')).toBe('no-store')
   })
