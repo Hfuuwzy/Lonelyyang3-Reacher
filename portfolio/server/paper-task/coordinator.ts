@@ -36,6 +36,8 @@ import {
 } from './stream'
 import { createPaperTaskSourceStore, type StoredSource } from './source-store'
 import { correctPaperTaskSource, type PaperTaskCorrection, type PaperTaskCorrectionResult } from './source-correction'
+import { readPaperTaskTranslation } from './translation-access'
+import type { PaperTaskTranslationView } from '../../app/utils/paper-task-translation-contract'
 
 const SAFE_CREATE_MESSAGE = '任务工作区创建失败，请稍后重试。'
 const SAFE_SELECTION_MESSAGE = '任务分支选择不受支持，请选择翻译、深读或两者。'
@@ -57,6 +59,7 @@ export interface PaperTaskService {
   cancel(taskId: string): Promise<PaperTaskActionResult>
   remove(taskId: string): Promise<PaperTaskActionResult>
   source(taskId: string): StoredSource | undefined
+  translation(taskId: string): PaperTaskTranslationView | undefined
   asset(taskId: string, assetId: string): Uint8Array | undefined
   correctSource(taskId: string, input: PaperTaskCorrection): PaperTaskCorrectionResult
 }
@@ -169,6 +172,14 @@ export function createPaperTaskService(
     return sourceStore.read(taskId, workspaceRoot(taskId))
   }
 
+  function translation(taskId: string): PaperTaskTranslationView | undefined {
+    if (deleting.has(taskId)) return undefined
+    const handle = store.get(taskId)
+    if (handle === undefined) return undefined
+    if (sourceStore.read(taskId, handle.workspaceRoot) === undefined) return undefined
+    return readPaperTaskTranslation(taskId, handle.workspaceRoot)
+  }
+
   function asset(taskId: string, assetId: string): Uint8Array | undefined {
     if (deleting.has(taskId)) return undefined
     return sourceStore.readAsset(taskId, workspaceRoot(taskId), assetId)
@@ -182,7 +193,7 @@ export function createPaperTaskService(
     return correctPaperTaskSource(sourceStore, taskId, handle.workspaceRoot, correction)
   }
 
-  return { submit, cancel, remove, source, asset, correctSource }
+  return { submit, cancel, remove, source, translation, asset, correctSource }
 }
 
 /**

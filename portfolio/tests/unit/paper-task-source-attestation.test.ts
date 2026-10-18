@@ -25,6 +25,7 @@ describe('prepared source route admission', () => {
   it.each([
     ['GET', `${base}/source`],
     ['PATCH', `${base}/source`],
+    ['GET', `${base}/translation`],
     ['GET', `${base}/assets/asset-${'a'.repeat(32)}`],
   ])('attests only the exact %s prepared-material route', async (method, path) => {
     const { req, event } = request(method, path)
@@ -35,6 +36,8 @@ describe('prepared source route admission', () => {
   it.each([
     ['POST', `${base}/source`],
     ['DELETE', `${base}/source`],
+    ['POST', `${base}/translation`],
+    ['GET', '/api/prototype/paper-task/not-a-uuid/translation'],
     ['GET', `${base}/assets/../original.pdf`],
     ['GET', '/api/prototype/paper-task/not-a-uuid/source'],
     ['GET', `${base}/assets/asset-${'a'.repeat(32)}/extra`],
