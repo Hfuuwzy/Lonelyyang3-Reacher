@@ -29,16 +29,53 @@ export type PaperTaskBranch = (typeof PAPER_TASK_BRANCHES)[number]
 export const PAPER_TASK_STAGES = ['preparing', 'generating', 'cleaning'] as const
 export type PaperTaskStage = (typeof PAPER_TASK_STAGES)[number]
 
-export const PAPER_TASK_STATES = ['not-selected', 'pending', 'running', 'sample-ready', 'preview-ready', 'failed', 'cancelled'] as const
+/**
+ * Settled branch states. `preview-ready` means readable content exists but the
+ * single content review or an applicable check is still missing.
+ * `needs-confirmation` means a readable result retains a substantive doubt that
+ * requires maintainer judgement. `complete` is reserved for a result whose
+ * one content review finished and whose independent structural checks found no
+ * substantive issue. No preview designation can claim completion.
+ */
+export const PAPER_TASK_STATES = ['not-selected', 'pending', 'running', 'sample-ready', 'preview-ready', 'needs-confirmation', 'complete', 'failed', 'cancelled'] as const
 export type PaperTaskState = (typeof PAPER_TASK_STATES)[number]
+
+/** Quality states carried by a generated preview; never a task outcome. */
+export const PAPER_TASK_QUALITY_STATES = ['preview', 'needs-confirmation', 'complete'] as const
+export type PaperTaskQualityState = (typeof PAPER_TASK_QUALITY_STATES)[number]
+
+/** Application-defined handling choices; the client maps them to labels. */
+export const PAPER_TASK_QUALITY_OPTIONS = ['keep-readable', 'inspect-source', 'regenerate'] as const
+export type PaperTaskQualityOption = (typeof PAPER_TASK_QUALITY_OPTIONS)[number]
+
+export const PAPER_TASK_QUALITY_LIMITS = {
+  maxIssues: 20,
+  maxIssueLength: 500,
+  maxOptions: 4,
+} as const
 
 export const PAPER_TASK_OUTCOMES = ['succeeded', 'failed', 'cancelled', 'disconnected'] as const
 export type PaperTaskOutcome = (typeof PAPER_TASK_OUTCOMES)[number]
 
-/** Designations a preview may carry. `sample` means unfinished; there is no
- * `complete` or `passed` designation on the wire. */
+/** Designations a preview may carry. `sample` means unfinished; a
+ * `generated-preview` may additionally carry a bounded quality result, but the
+ * designation itself never claims completion. */
 export const PAPER_TASK_DESIGNATIONS = ['sample', 'generated-preview'] as const
 export type PaperTaskDesignation = (typeof PAPER_TASK_DESIGNATIONS)[number]
+
+/**
+ * A bounded, application-defined quality result for one branch. `issues` are
+ * short reader-facing descriptions; `options` are stable identifiers rather
+ * than executable instructions or URLs.
+ */
+export const paperTaskQualitySchema = z.object({
+  status: z.enum(PAPER_TASK_QUALITY_STATES),
+  issues: z.array(z.string().min(1).max(PAPER_TASK_QUALITY_LIMITS.maxIssueLength))
+    .max(PAPER_TASK_QUALITY_LIMITS.maxIssues).readonly(),
+  options: z.array(z.enum(PAPER_TASK_QUALITY_OPTIONS))
+    .max(PAPER_TASK_QUALITY_LIMITS.maxOptions).readonly(),
+}).strict().readonly()
+export type PaperTaskQuality = z.infer<typeof paperTaskQualitySchema>
 
 /** Per-preview paragraph bounds shared by the backend and the frontend. */
 export const PAPER_TASK_PREVIEW_PARAGRAPH_LIMITS = {
@@ -116,6 +153,7 @@ const previewEventSchema = z.object({
   paragraphs: z.array(z.string().min(1).max(PAPER_TASK_PREVIEW_PARAGRAPH_LIMITS.maxParagraphLength))
     .min(1)
     .max(PAPER_TASK_PREVIEW_PARAGRAPH_LIMITS.maxParagraphs),
+  quality: paperTaskQualitySchema.optional(),
 }).passthrough()
 
 /** Exactly the two branches of this wire contract; unknown branch keys rejected. */
@@ -134,10 +172,10 @@ const branchStatesSchema = z.object({
  * cancel may land on a task whose sibling branch already failed.
  */
 const PAPER_TASK_TERMINAL_STATE_RULES: Record<PaperTaskOutcome, ReadonlySet<PaperTaskState>> = {
-  succeeded: new Set(['sample-ready', 'preview-ready', 'not-selected']),
-  failed: new Set(['failed', 'sample-ready', 'preview-ready', 'not-selected']),
-  cancelled: new Set(['cancelled', 'failed', 'sample-ready', 'preview-ready', 'not-selected']),
-  disconnected: new Set(['cancelled', 'failed', 'sample-ready', 'preview-ready', 'not-selected']),
+  succeeded: new Set(['complete', 'needs-confirmation', 'preview-ready', 'sample-ready', 'not-selected']),
+  failed: new Set(['complete', 'needs-confirmation', 'preview-ready', 'sample-ready', 'failed', 'not-selected']),
+  cancelled: new Set(['complete', 'needs-confirmation', 'preview-ready', 'sample-ready', 'failed', 'cancelled', 'not-selected']),
+  disconnected: new Set(['complete', 'needs-confirmation', 'preview-ready', 'sample-ready', 'failed', 'cancelled', 'not-selected']),
 }
 
 const terminalEventSchema = z.object({
@@ -208,7 +246,12 @@ export function validatePaperTaskEvent(event: unknown, selection: PaperTaskSelec
     case 'progress':
       return data.branch === null || selected.includes(data.branch)
     case 'preview':
-      return selected.includes(data.branch)
+      if (!selected.includes(data.branch)) {
+        return false
+      }
+      // A sample can never carry a quality result; quality belongs to a
+      // generated preview that has a retained publication to review.
+      return data.quality === undefined || data.designation === 'generated-preview'
     case 'terminal':
       return terminalBranchesSatisfySelection(data.branches, selection)
     default:

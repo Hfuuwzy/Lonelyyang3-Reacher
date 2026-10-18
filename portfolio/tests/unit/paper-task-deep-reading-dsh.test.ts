@@ -40,11 +40,11 @@ describe('paper-task deep-reading pinned DSH integration', () => {
     const events = await collect(fixture.service)
     // Then the full report and grounded key passages survive runtime cleanup.
     assertReport(fixture.root, events)
-    expect(events.at(-1)).toMatchObject({ type: 'terminal', outcome: 'succeeded', branches: { translation: 'not-selected', 'deep-reading': 'preview-ready' }, cleanup: 'clean' })
+    expect(events.at(-1)).toMatchObject({ type: 'terminal', outcome: 'succeeded', branches: { translation: 'not-selected', 'deep-reading': 'needs-confirmation' }, cleanup: 'clean' })
     const transcript = callsAndResults(fixture.received.at(-1) ?? { model: 'fixture' })
     expect(transcript.filter((call) => call.name === 'paper_task_read_source').map((call) => call.arguments.record_id)).toEqual(['p1-r0', 'p1-r1', 'p1-r2', 'p2-r3', 'p2-r4', 'p2-r5'])
     expect(transcript.filter((call) => call.name === 'paper_task_read_resource').map((call) => call.arguments.resource_id)).toEqual(['deep-reading:SKILL.md', 'deep-reading:references:critical_thinking.md'])
-    expect(fixture.received[0]?.tools?.map((tool) => tool.function.name).sort()).toEqual(['paper_task_list_resources', 'paper_task_list_sources', 'paper_task_read_branch', 'paper_task_read_input', 'paper_task_read_resource', 'paper_task_read_source', 'paper_task_write_branch'])
+    expect(fixture.received[0]?.tools?.map((tool) => tool.function.name).sort()).toEqual(['paper_task_apply_local_repair', 'paper_task_list_resources', 'paper_task_list_sources', 'paper_task_read_branch', 'paper_task_read_input', 'paper_task_read_resource', 'paper_task_read_source', 'paper_task_submit_content_review', 'paper_task_write_branch'])
   }, 45000)
 
   it('publishes deep reading before deferred translation ends and retains it after sibling failure', async () => {
@@ -64,7 +64,7 @@ describe('paper-task deep-reading pinned DSH integration', () => {
     } finally { releaseTranslation() }
     // Then translation failure cannot erase the independently usable report.
     assertReport(fixture.root, events)
-    expect(events.at(-1)).toMatchObject({ type: 'terminal', outcome: 'failed', branches: { translation: 'failed', 'deep-reading': 'preview-ready' }, cleanup: 'clean' })
+    expect(events.at(-1)).toMatchObject({ type: 'terminal', outcome: 'failed', branches: { translation: 'failed', 'deep-reading': 'needs-confirmation' }, cleanup: 'clean' })
   }, 45000)
 })
 
@@ -120,6 +120,14 @@ function deepDecision(body: FixtureBody): Decision {
     }
   }
   if (!calls.some((call) => call.name === 'paper_task_write_branch')) return { tool: 'paper_task_write_branch', arguments: { markdown: REPORT, source_record_ids: ids, claim_evidence: CLAIMS, uncompleted_reasons: ['第二学年失访机制尚未核实。'] } }
+  const branchPage = calls.filter((call) => call.name === 'paper_task_read_branch').at(-1)?.output
+  const page = branchPage === undefined ? undefined : pageSchema.parse(JSON.parse(branchPage))
+  if (page === undefined || page.nextOffset < page.totalBytes) {
+    return { tool: 'paper_task_read_branch', arguments: { offset: page?.nextOffset ?? 0 } }
+  }
+  if (!calls.some((call) => call.name === 'paper_task_submit_content_review')) {
+    return { tool: 'paper_task_submit_content_review', arguments: { findings: [] } }
+  }
   return { content: 'The unfinished draft is saved.' }
 }
 
@@ -141,6 +149,7 @@ function assertReport(root: string, events: readonly PaperTaskEvent[]): void {
   const preview = events.find((event) => event.type === 'preview' && event.branch === 'deep-reading')
   if (preview?.type !== 'preview') throw new Error('deep-reading preview missing')
   expect(preview.designation).toBe('generated-preview')
+  expect(preview.quality).toMatchObject({ status: 'needs-confirmation' })
   expect(preview.paragraphs).toHaveLength(8)
   expect(preview.paragraphs.join('\n\n')).not.toBe(REPORT)
   expect(existsSync(join(root, 'runtime-local', TASK_ID))).toBe(false)

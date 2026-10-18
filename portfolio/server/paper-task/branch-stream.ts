@@ -18,7 +18,7 @@ export async function runPaperTaskBranch(run: PaperTaskBranchRun): Promise<void>
   const { handle, branch, runtime, queue, sourceRecords } = run
   let ok = false
   let sawPreview = false
-  let state: 'sample-ready' | 'preview-ready' = 'sample-ready'
+  let state: 'sample-ready' | 'preview-ready' | 'needs-confirmation' | 'complete' = 'sample-ready'
   try {
     const events = runtime.events()[Symbol.asyncIterator]()
     while (!handle.controller.signal.aborted) {
@@ -31,8 +31,16 @@ export async function runPaperTaskBranch(run: PaperTaskBranchRun): Promise<void>
       } else if (event.type === 'generated-preview') {
         saveGeneratedPreview(handle.workspaceRoot, branch, event.markdown)
         sawPreview = true
-        state = 'preview-ready'
-        queue.push({ kind: 'event', event: { type: 'preview', taskId: handle.taskId, branch, designation: 'generated-preview', paragraphs: [...event.paragraphs] } })
+        state = event.quality.status === 'complete'
+          ? 'complete'
+          : event.quality.status === 'needs-confirmation' ? 'needs-confirmation' : 'preview-ready'
+        queue.push({
+          kind: 'event',
+          event: {
+            type: 'preview', taskId: handle.taskId, branch, designation: 'generated-preview',
+            paragraphs: [...event.paragraphs], quality: { ...event.quality, issues: [...event.quality.issues], options: [...event.quality.options] },
+          },
+        })
       } else {
         const validated = validateWorkerPreview(event, branch, sourceRecords)
         if (validated === undefined) throw new Error('preview dependencies invalid')

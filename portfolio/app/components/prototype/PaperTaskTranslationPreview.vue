@@ -7,7 +7,7 @@
           重新读取主稿
         </button>
       </div>
-      <p class="paper-task-translation__badge">自然中文 Markdown · 未完成预览 · 未经质量检查</p>
+      <p class="paper-task-translation__badge">{{ qualityBadge }}</p>
     </header>
 
     <p v-if="translationState.kind === 'loading'" class="paper-task-translation__note" role="status">
@@ -33,8 +33,11 @@
       >
         原文仍有缺失、无法恢复或未核实的内容；主稿保留可读文本，具体说明见下方。
       </p>
+      <p v-else-if="props.qualityStatus === 'complete'" class="paper-task-translation__note">
+        内容审阅与独立结构检查未发现未解决事项；这仍不等于逐句准确证明。
+      </p>
       <p v-else class="paper-task-translation__note">
-        受控结构检查未发现未解决材料；这不等于逐句准确、质量通过或内容完整。
+        受控结构检查未发现未解决材料；这不等于逐句准确或质量通过。
       </p>
 
       <ul v-if="translationState.view.unresolved.length > 0" class="paper-task-translation__unresolved" aria-label="未完成说明">
@@ -62,12 +65,24 @@ import {
 interface Props {
   readonly taskId: string | null
   readonly ready: boolean
+  readonly qualityStatus?: 'preview' | 'needs-confirmation' | 'complete'
 }
 
 const props = defineProps<Props>()
 const emit = defineEmits<{ readonly loaded: [] }>()
 const translation = usePaperTaskTranslation(toRef(props, 'taskId'), toRef(props, 'ready'))
 const translationState = translation.state
+
+const qualityBadge = computed(() => {
+  switch (props.qualityStatus) {
+    case 'complete':
+      return '自然中文 Markdown · 内容审阅与结构检查通过'
+    case 'needs-confirmation':
+      return '自然中文 Markdown · 需确认 · 保留可读内容'
+    default:
+      return '自然中文 Markdown · 未完成预览 · 未经质量检查'
+  }
+})
 
 const staleSummary = computed(() => {
   const current = translationState.value

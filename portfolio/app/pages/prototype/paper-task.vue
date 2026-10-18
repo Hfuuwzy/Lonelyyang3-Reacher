@@ -105,7 +105,8 @@
     <PaperTaskTranslationPreview
       v-if="taskId !== null"
       :task-id="taskId"
-      :ready="phase === 'result' && branchStates.translation === 'preview-ready'"
+      :ready="translationReady"
+      :quality-status="translationQualityStatus"
       @loaded="translationMasterTaskId = taskId"
     />
 
@@ -116,6 +117,12 @@
       </header>
       <p v-for="(paragraph, index) in preview.paragraphs" :key="index" class="paper-task__preview-paragraph">
         {{ paragraph }}
+      </p>
+      <ul v-if="preview.issues.length > 0" class="paper-task__preview-issues" aria-label="需确认事项">
+        <li v-for="(issue, index) in preview.issues" :key="index">{{ issue }}</li>
+      </ul>
+      <p v-if="preview.options.length > 0" class="paper-task__preview-options">
+        处理选择：{{ preview.options.join('、') }}
       </p>
     </article>
 
@@ -160,6 +167,15 @@ const {
 const localePath = useLocalePath()
 const allBranches = computed(() => PAPER_TASK_BRANCHES)
 const translationMasterTaskId = ref<string | null>(null)
+const translationReady = computed(() => phase.value === 'result'
+  && (branchStates.value.translation === 'preview-ready'
+    || branchStates.value.translation === 'needs-confirmation'
+    || branchStates.value.translation === 'complete'))
+const translationQualityStatus = computed<'preview' | 'needs-confirmation' | 'complete'>(() => {
+  if (branchStates.value.translation === 'complete') return 'complete'
+  if (branchStates.value.translation === 'needs-confirmation') return 'needs-confirmation'
+  return 'preview'
+})
 const visiblePreviewCards = computed(() => previewCards.value.filter((preview) =>
   !(preview.branch === 'translation' && translationMasterTaskId.value === taskId.value),
 ))
@@ -198,5 +214,17 @@ function onPdfChange(event: Event): void {
 .paper-task__settings-link:focus-visible {
   outline: 3px solid var(--vermilion);
   outline-offset: 2px;
+}
+
+.paper-task__preview-issues,
+.paper-task__preview-options {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+  line-height: 1.7;
+}
+
+.paper-task__preview-issues {
+  padding-inline-start: 1.1rem;
 }
 </style>

@@ -232,11 +232,40 @@ describe('paperTaskActionResultSchema - discriminated valid combinations', () =>
   })
 })
 
-describe('no complete/passed quality status on the wire', () => {
-  it('keeps complete and passed out of the state and outcome vocabularies', () => {
-    for (const word of ['complete', 'passed']) {
-      expect(PAPER_TASK_STATES).not.toContain(word)
+describe('quality result attachment', () => {
+  it('keeps quality states out of the task outcome vocabulary', () => {
+    for (const word of ['complete', 'needs-confirmation', 'preview', 'passed']) {
       expect(PAPER_TASK_OUTCOMES).not.toContain(word)
     }
+    expect(PAPER_TASK_STATES).toContain('complete')
+    expect(PAPER_TASK_STATES).toContain('needs-confirmation')
+  })
+
+  it('accepts a generated preview with a bounded quality result', () => {
+    expect(validatePaperTaskEvent(preview({
+      designation: 'generated-preview',
+      quality: { status: 'needs-confirmation', issues: ['关键数字需要确认。'], options: ['keep-readable', 'inspect-source'] },
+    }), 'translation')).toBe(true)
+  })
+
+  it('rejects a sample that claims any quality result', () => {
+    expect(validatePaperTaskEvent(preview({
+      quality: { status: 'complete', issues: [], options: [] },
+    }), 'translation')).toBe(false)
+    expect(validatePaperTaskEvent(preview({
+      quality: { status: 'preview', issues: [], options: ['regenerate'] },
+    }), 'translation')).toBe(false)
+  })
+
+  it('rejects an unknown quality state, option, or unbounded issue', () => {
+    expect(validatePaperTaskEvent(preview({ quality: { status: 'passed', issues: [], options: [] } }), 'translation')).toBe(false)
+    expect(validatePaperTaskEvent(preview({ quality: { status: 'preview', issues: [], options: ['auto-publish'] } }), 'translation')).toBe(false)
+    expect(validatePaperTaskEvent(preview({ quality: { status: 'preview', issues: ['x'.repeat(501)], options: [] } }), 'translation')).toBe(false)
+  })
+
+  it('accepts complete and needs-confirmation as settled terminal branch states', () => {
+    expect(validatePaperTaskEvent(terminal({ branches: { translation: 'complete', 'deep-reading': 'not-selected' } }), 'translation')).toBe(true)
+    expect(validatePaperTaskEvent(terminal({ branches: { translation: 'needs-confirmation', 'deep-reading': 'not-selected' } }), 'translation')).toBe(true)
+    expect(validatePaperTaskEvent(terminal({ outcome: 'failed', branches: { translation: 'needs-confirmation', 'deep-reading': 'failed' } }), 'both')).toBe(true)
   })
 })

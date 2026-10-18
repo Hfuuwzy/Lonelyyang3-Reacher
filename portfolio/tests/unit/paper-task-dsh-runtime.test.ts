@@ -22,6 +22,8 @@ const EXPECTED_TOOLS = [
   'paper_task_read_resource',
   'paper_task_read_branch',
   'paper_task_write_branch',
+  'paper_task_submit_content_review',
+  'paper_task_apply_local_repair',
 ]
 const cropCanvas = createCanvas(3, 2)
 const cropContext = cropCanvas.getContext('2d')
@@ -145,7 +147,7 @@ describe('paper-task DSH integration', () => {
     if (firstRequest?.tools === undefined) throw new Error('fixture did not receive tool definitions')
     const firstTools = firstRequest.tools.map((tool) => tool.function.name).sort()
     expect(firstTools).toEqual([...EXPECTED_TOOLS].sort())
-    const pages = agentRequests.map(lastSkillPage).filter((page): page is ResourcePage => page !== undefined)
+    const pages = agentRequests.map((body) => lastPage(body, 'paper_task_read_resource', SKILL_ID)).filter((page): page is ResourcePage => page !== undefined)
     expect(pages.length).toBeGreaterThan(1)
     expect(new Set(pages.map((page) => page.offset)).size).toBeGreaterThan(1)
     const last = pages.at(-1)
@@ -154,9 +156,9 @@ describe('paper-task DSH integration', () => {
     expect(pages.some((page) => page.text.includes('name: academic-paper-zh-translation'))).toBe(true)
 
     const terminal = events.at(-1)
-    expect(terminal).toMatchObject({ type: 'terminal', outcome: 'succeeded', branches: { translation: 'preview-ready', 'deep-reading': 'not-selected' }, cleanup: 'clean' })
+    expect(terminal).toMatchObject({ type: 'terminal', outcome: 'succeeded', branches: { translation: 'complete', 'deep-reading': 'not-selected' }, cleanup: 'clean' })
     const preview = events.find((event) => event.type === 'preview')
-    expect(preview).toMatchObject({ type: 'preview', designation: 'generated-preview' })
+    expect(preview).toMatchObject({ type: 'preview', designation: 'generated-preview', quality: { status: 'complete', issues: [] } })
     if (preview?.type !== 'preview') throw new Error('fixture did not emit a preview event')
     expect(preview.paragraphs[0]).toBe('# 未完成译文')
     expect(preview.paragraphs[1]).toBe('Fixture source sentence.')
@@ -183,7 +185,7 @@ function createFixtureAgent(): { readonly decide: (body: FixtureBody) => AgentDe
         return { tool: next.tool, arguments: next.arguments }
       }
       if (step === PLAN.length) {
-        const page = lastSkillPage(body)
+        const page = lastPage(body, 'paper_task_read_resource', SKILL_ID)
         if (page !== undefined && page.nextOffset < page.totalBytes) {
           return { tool: 'paper_task_read_resource', arguments: { resource_id: SKILL_ID, offset: page.nextOffset, limit_bytes: RESOURCE_PAGE_BYTES } }
         }
@@ -198,23 +200,23 @@ function createFixtureAgent(): { readonly decide: (body: FixtureBody) => AgentDe
           ] },
         }
       }
+      const branchPage = lastPage(body, 'paper_task_read_branch')
+      if (branchPage === undefined) return { tool: 'paper_task_read_branch', arguments: { offset: 0 } }
+      if (branchPage.nextOffset < branchPage.totalBytes) {
+        return { tool: 'paper_task_read_branch', arguments: { offset: branchPage.nextOffset } }
+      }
+      if (!toolWasCalled(body, 'paper_task_submit_content_review')) {
+        return { tool: 'paper_task_submit_content_review', arguments: { findings: [] } }
+      }
       return { content: 'The retained branch preview is ready.' }
     },
   }
 }
 
-type ResourcePage = {
-  readonly offset: number
-  readonly nextOffset: number
-  readonly totalBytes: number
-  readonly text: string
-}
-
-function lastSkillPage(body: FixtureBody): ResourcePage | undefined {
-  const messages = body.messages ?? []
+function lastPage(body: FixtureBody, toolName: string, resourceId?: string): ResourcePage | undefined {
   const calls = new Map<string, { readonly name: string; readonly arguments: string }>()
   let page: ResourcePage | undefined
-  for (const message of messages) {
+  for (const message of body.messages ?? []) {
     if (message.role === 'assistant' && Array.isArray(message.tool_calls)) {
       for (const call of message.tool_calls) {
         if (call.id === undefined || call.function === undefined) continue
@@ -223,15 +225,17 @@ function lastSkillPage(body: FixtureBody): ResourcePage | undefined {
     }
     if (message.role !== 'tool' || message.tool_call_id === undefined) continue
     const call = calls.get(message.tool_call_id)
-    if (call === undefined || call.name !== 'paper_task_read_resource') continue
-    let resourceId: unknown
-    try {
-      const parsedArguments = z.object({ resource_id: z.string() }).passthrough().safeParse(JSON.parse(call.arguments))
-      resourceId = parsedArguments.success ? parsedArguments.data.resource_id : undefined
-    } catch {
-      resourceId = undefined
+    if (call === undefined || call.name !== toolName) continue
+    if (resourceId !== undefined) {
+      let named: unknown
+      try {
+        const parsedArguments = z.object({ resource_id: z.string() }).passthrough().safeParse(JSON.parse(call.arguments))
+        named = parsedArguments.success ? parsedArguments.data.resource_id : undefined
+      } catch {
+        named = undefined
+      }
+      if (named !== resourceId) continue
     }
-    if (resourceId !== SKILL_ID) continue
     const text = contentText(message.content)
     if (text.length === 0) continue
     try {
@@ -242,6 +246,18 @@ function lastSkillPage(body: FixtureBody): ResourcePage | undefined {
     }
   }
   return page
+}
+
+function toolWasCalled(body: FixtureBody, toolName: string): boolean {
+  return (body.messages ?? []).some((message) => message.role === 'assistant'
+    && (message.tool_calls ?? []).some((call) => call.function?.name === toolName))
+}
+
+type ResourcePage = {
+  readonly offset: number
+  readonly nextOffset: number
+  readonly totalBytes: number
+  readonly text: string
 }
 
 function contentText(content: unknown): string {

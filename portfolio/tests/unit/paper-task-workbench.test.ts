@@ -277,6 +277,46 @@ describe('paper-task workbench', () => {
     expect(harness.workbench.terminalTitle.value).toBe('文本预览任务结束')
   })
 
+  it('presents complete and needs-confirmation quality results distinctly', async () => {
+    const harness = createHarness()
+    const submission = harness.workbench.handleSubmit()
+    harness.emit(ACCEPTED)
+    harness.emit({
+      type: 'preview',
+      taskId: TASK_ID,
+      branch: 'translation',
+      designation: 'generated-preview',
+      paragraphs: ['完整译文。'],
+      quality: { status: 'complete', issues: [], options: [] },
+    })
+    harness.emit({
+      type: 'preview',
+      taskId: TASK_ID,
+      branch: 'deep-reading',
+      designation: 'generated-preview',
+      paragraphs: ['需确认的报告。'],
+      quality: { status: 'needs-confirmation', issues: ['关键数字需要核对。'], options: ['keep-readable', 'inspect-source'] },
+    })
+    const terminal: PaperTaskEvent = {
+      type: 'terminal',
+      taskId: TASK_ID,
+      outcome: 'succeeded',
+      branches: { translation: 'complete', 'deep-reading': 'needs-confirmation' },
+      cleanup: 'clean',
+    }
+    harness.emit(terminal)
+    harness.resolveSubmission({ kind: 'stream', outcome: { kind: 'terminal', terminal } })
+    await submission
+
+    expect(harness.workbench.previewCards.value.map((card) => ({ branch: card.branch, heading: card.headingLabel, issues: card.issues, options: card.options }))).toEqual([
+      { branch: 'translation', heading: '完整成品', issues: [], options: [] },
+      { branch: 'deep-reading', heading: '需确认', issues: ['关键数字需要核对。'], options: ['保留当前可读内容', '核对原文材料'] },
+    ])
+    expect(harness.workbench.stateLabel('complete')).toBe('完整成品')
+    expect(harness.workbench.stateLabel('needs-confirmation')).toBe('需确认')
+    expect(harness.workbench.terminalTitle.value).toBe('完整成品已就绪')
+  })
+
   it('keeps a streamed preview visible during running and after network EOF', async () => {
     const harness = createHarness()
     const submission = harness.workbench.handleSubmit()

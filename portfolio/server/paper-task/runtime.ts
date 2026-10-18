@@ -16,15 +16,26 @@ import { createInterface } from 'node:readline'
 import { z } from 'zod'
 import { workerPreviewSchema, type PaperTaskWorkerPreview } from './source-pieces'
 import {
+  PAPER_TASK_QUALITY_LIMITS,
+  PAPER_TASK_QUALITY_OPTIONS,
+  PAPER_TASK_QUALITY_STATES,
   paperTaskStageSchema,
   type PaperTaskBranch,
+  type PaperTaskQualityOption,
+  type PaperTaskQualityState,
   type PaperTaskStage,
 } from '../../app/utils/paper-task-contract'
+
+export type PaperTaskRuntimeQuality = {
+  readonly status: PaperTaskQualityState
+  readonly issues: readonly string[]
+  readonly options: readonly PaperTaskQualityOption[]
+}
 
 export type PaperTaskRuntimeEvent =
   | { readonly type: 'progress'; readonly stage: PaperTaskStage; readonly completed: number; readonly total: number }
   | PaperTaskWorkerPreview
-  | { readonly type: 'generated-preview'; readonly markdown: string; readonly paragraphs: readonly string[] }
+  | { readonly type: 'generated-preview'; readonly markdown: string; readonly paragraphs: readonly string[]; readonly quality: PaperTaskRuntimeQuality }
 
 export type PaperTaskBranchResult = { readonly ok: true } | { readonly ok: false }
 export type PaperTaskCloseResult = { readonly ok: true } | { readonly ok: false }
@@ -68,10 +79,17 @@ const runtimeProgressSchema = z.object({
   total: z.number().int().positive(),
 }).passthrough()
 
+const generatedPreviewQualitySchema = z.object({
+  status: z.enum(PAPER_TASK_QUALITY_STATES),
+  issues: z.array(z.string().min(1).max(PAPER_TASK_QUALITY_LIMITS.maxIssueLength)).max(PAPER_TASK_QUALITY_LIMITS.maxIssues),
+  options: z.array(z.enum(PAPER_TASK_QUALITY_OPTIONS)).max(PAPER_TASK_QUALITY_LIMITS.maxOptions),
+}).strict()
+
 const generatedPreviewSchema = z.object({
   type: z.literal('generated-preview'),
-  markdown: z.string().min(1).max(200000),
+  markdown: z.string().min(1).max(400000),
   paragraphs: z.array(z.string().min(1).max(2000)).min(1).max(8),
+  quality: generatedPreviewQualitySchema,
 }).strict()
 
 const runtimeEventSchema = z.union([

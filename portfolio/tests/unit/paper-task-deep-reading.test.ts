@@ -62,28 +62,40 @@ describe('deep-reading whole-paper evidence boundary', () => {
     await expect(fixture.tools.paper_task_write_branch({ markdown, source_record_ids: ['p1-r0'], claim_evidence: claims })).rejects.toThrow('every indexed source record')
   })
 
-  it('rejects evidence that names an unknown source record', async () => {
+  it('retains readable prose but records an unknown source record as a quality issue', async () => {
     const fixture = setup(1)
     await ready(fixture)
     const markdown = 'Fact: a result was reported. Inference: it could generalize.'
     const claims = [{ passage: 'Fact: a result was reported.', kind: 'fact', source_record_id: 'p9-r9', quote: 'fabricated' }, { passage: 'Inference: it could generalize.', kind: 'inference', source_record_id: 'p1-r0', quote: 'Evidence 0.', explanation: 'This is an interpretation.' }]
-    await expect(fixture.tools.paper_task_write_branch({ markdown, source_record_ids: ['p1-r0'], claim_evidence: claims })).rejects.toThrow('unknown source record')
+    await expect(fixture.tools.paper_task_write_branch({ markdown, source_record_ids: ['p1-r0'], claim_evidence: claims })).resolves.toContain('saved')
+    expect(readFileSync(join(fixture.branchRoot, 'report.md'), 'utf8')).toBe(markdown)
+    const evidence = evidenceOf(fixture)
+    expect(evidence.status).toBe('needs-confirmation')
+    expect(evidence.qualityIssues.map((issue: { code: string }) => issue.code)).toContain('claim-unknown-record')
   })
 
-  it('rejects visual-only records as verified evidence even when textual content matches', async () => {
+  it('never verifies visual-only records as evidence but keeps the report readable', async () => {
     const fixture = setup(1, [{ id: 'asset-abc', recordId: 'p1-r0', availability: 'available', understanding: 'unverified', relativePath: '../../assets/asset-abc.png' }], 'table')
     await ready(fixture)
     const markdown = 'Fact: the figure confirms a trend. Inference: this indicates growth.'
     const claims = [{ passage: 'Fact: the figure confirms a trend.', kind: 'fact', source_record_id: 'p1-r0', quote: 'Evidence 0.' }, { passage: 'Inference: this indicates growth.', kind: 'inference', source_record_id: 'p1-r0', quote: 'Evidence 0.', explanation: 'This interprets the alleged trend.' }]
-    await expect(fixture.tools.paper_task_write_branch({ markdown, source_record_ids: ['p1-r0'], claim_evidence: claims })).rejects.toThrow('visual-only')
+    await expect(fixture.tools.paper_task_write_branch({ markdown, source_record_ids: ['p1-r0'], claim_evidence: claims })).resolves.toContain('saved')
+    const evidence = evidenceOf(fixture)
+    expect(evidence.status).toBe('needs-confirmation')
+    expect(evidence.claims).toEqual([])
+    expect(evidence.qualityIssues.map((issue: { code: string }) => issue.code)).toContain('claim-visual')
   })
 
-  it('rejects fabricated evidence quotes', async () => {
+  it('retains readable prose but drops a fabricated evidence quote from the verified set', async () => {
     const fixture = setup(1)
     await ready(fixture)
     const passage = 'Fact: the source reports a result. Inference: this might generalize.'
     const claims = [{ passage: 'Fact: the source reports a result.', kind: 'fact', source_record_id: 'p1-r0', quote: 'invented quote' }, { passage: 'Inference: this might generalize.', kind: 'inference', source_record_id: 'p1-r0', quote: 'Evidence 0.', explanation: 'This is an inference.' }]
-    await expect(fixture.tools.paper_task_write_branch({ markdown: passage, source_record_ids: ['p1-r0'], claim_evidence: claims })).rejects.toThrow('quote does not match')
+    await expect(fixture.tools.paper_task_write_branch({ markdown: passage, source_record_ids: ['p1-r0'], claim_evidence: claims })).resolves.toContain('saved')
+    expect(readFileSync(join(fixture.branchRoot, 'report.md'), 'utf8')).toBe(passage)
+    const evidence = evidenceOf(fixture)
+    expect(evidence.claims).toHaveLength(1)
+    expect(evidence.qualityIssues.map((issue: { code: string }) => issue.code)).toContain('claim-quote')
   })
 
   it('rejects a source revision changed after its evidence was read', async () => {
@@ -107,7 +119,7 @@ describe('deep-reading whole-paper evidence boundary', () => {
     })
   })
 
-  it('rejects an unverified asset when the reader report silently omits confirmation', async () => {
+  it('keeps an undisclosed unverified asset readable in needs-confirmation', async () => {
     const fixture = setup(1, [{ id: 'asset-abc', recordId: 'p1-r0', availability: 'available', understanding: 'unverified', relativePath: '../../assets/asset-abc.png' }])
     await ready(fixture)
     const markdown = '事实：论文报告该结果。\n\n分析推论：结果可能推广。'
@@ -115,7 +127,10 @@ describe('deep-reading whole-paper evidence boundary', () => {
       { passage: '事实：论文报告该结果。', kind: 'fact', source_record_id: 'p1-r0', quote: 'Evidence 0.' },
       { passage: '分析推论：结果可能推广。', kind: 'inference', source_record_id: 'p1-r0', quote: 'Evidence 0.', explanation: 'This goes beyond the text.' },
     ]
-    await expect(fixture.tools.paper_task_write_branch({ markdown, source_record_ids: ['p1-r0'], claim_evidence: claims, uncompleted_reasons: ['The crop is unverified.'] })).rejects.toThrow('disclose unverified source material')
+    await expect(fixture.tools.paper_task_write_branch({ markdown, source_record_ids: ['p1-r0'], claim_evidence: claims, uncompleted_reasons: ['The crop is unverified.'] })).resolves.toContain('saved')
+    const evidence = evidenceOf(fixture)
+    expect(evidence.status).toBe('needs-confirmation')
+    expect(evidence.qualityIssues.map((issue: { code: string }) => issue.code)).toContain('disclosure-missing')
   })
 
   it('accepts a naturally phrased Chinese report with claim-matched fact and inference cues', async () => {
@@ -129,7 +144,7 @@ describe('deep-reading whole-paper evidence boundary', () => {
     await expect(fixture.tools.paper_task_write_branch({ markdown, source_record_ids: ['p1-r0'], claim_evidence: claims })).resolves.toContain('saved')
   })
 
-  it('rejects fact classification when the cited report passage is marked as an inference', async () => {
+  it('records a fact/inference classification mismatch without discarding the report', async () => {
     const fixture = setup(1)
     await ready(fixture)
     const markdown = '事实：论文报告了该结果。\n\n推论：这一结果或许可以推广。'
@@ -137,10 +152,13 @@ describe('deep-reading whole-paper evidence boundary', () => {
       { passage: '推论：这一结果或许可以推广。', kind: 'fact', source_record_id: 'p1-r0', quote: 'Evidence 0.' },
       { passage: '事实：论文报告了该结果。', kind: 'inference', source_record_id: 'p1-r0', quote: 'Evidence 0.', explanation: 'This is misclassified.' },
     ]
-    await expect(fixture.tools.paper_task_write_branch({ markdown, source_record_ids: ['p1-r0'], claim_evidence: claims })).rejects.toThrow('passage classification')
+    await expect(fixture.tools.paper_task_write_branch({ markdown, source_record_ids: ['p1-r0'], claim_evidence: claims })).resolves.toContain('saved')
+    const evidence = evidenceOf(fixture)
+    expect(evidence.claims).toEqual([])
+    expect(evidence.qualityIssues.map((issue: { code: string }) => issue.code)).toContain('claim-classification')
   })
 
-  it('rejects gap records as verified evidence even if state says present', async () => {
+  it('never verifies gap records but keeps the report readable', async () => {
     const fixture = setup(1, [], 'gap')
     await ready(fixture)
     const markdown = '事实：原文报告结果。推论：该结果可能适用。'
@@ -148,7 +166,10 @@ describe('deep-reading whole-paper evidence boundary', () => {
       { passage: '事实：原文报告结果。', kind: 'fact', source_record_id: 'p1-r0', quote: 'Evidence 0.' },
       { passage: '推论：该结果可能适用。', kind: 'inference', source_record_id: 'p1-r0', quote: 'Evidence 0.', explanation: 'Interpretation.' },
     ]
-    await expect(fixture.tools.paper_task_write_branch({ markdown, source_record_ids: ['p1-r0'], claim_evidence: claims })).rejects.toThrow('gap record')
+    await expect(fixture.tools.paper_task_write_branch({ markdown, source_record_ids: ['p1-r0'], claim_evidence: claims })).resolves.toContain('saved')
+    const evidence = evidenceOf(fixture)
+    expect(evidence.claims).toEqual([])
+    expect(evidence.qualityIssues.map((issue: { code: string }) => issue.code)).toContain('claim-gap')
   })
 
   it('rejects a source index changed after complete discovery', async () => {
@@ -173,6 +194,14 @@ describe('deep-reading whole-paper evidence boundary', () => {
     await expect(fixture.tools.paper_task_list_sources({ offset: 0, limit: 1 })).rejects.toThrow('outside the assigned directory')
   })
 })
+
+function evidenceOf(fixture: ReturnType<typeof setup>): {
+  readonly status: string
+  readonly claims: readonly unknown[]
+  readonly qualityIssues: readonly { readonly code: string }[]
+} {
+  return JSON.parse(readFileSync(join(fixture.branchRoot, 'evidence.json'), 'utf8'))
+}
 
 async function ready(fixture: ReturnType<typeof setup>): Promise<void> {
   await readAll((offset) => fixture.tools.paper_task_read_resource({ resource_id: 'deep-reading:SKILL.md', offset }))

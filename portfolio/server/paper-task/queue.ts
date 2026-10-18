@@ -2,7 +2,7 @@ import type { PaperTaskBranch, PaperTaskEvent } from '../../app/utils/paper-task
 
 export type QueueItem =
   | { readonly kind: 'event'; readonly event: PaperTaskEvent }
-  | { readonly kind: 'done'; readonly branch: PaperTaskBranch; readonly ok: boolean; readonly state: 'sample-ready' | 'preview-ready' }
+  | { readonly kind: 'done'; readonly branch: PaperTaskBranch; readonly ok: boolean; readonly state: 'sample-ready' | 'preview-ready' | 'needs-confirmation' | 'complete' }
 
 export class EventQueue<T = QueueItem> {
   private readonly items: T[] = []

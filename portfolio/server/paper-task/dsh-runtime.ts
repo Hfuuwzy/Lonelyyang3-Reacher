@@ -2,15 +2,15 @@ import { DeepSeekHarness } from '@deepseek-ai/dsh-sdk-client'
 import type { SdkPromptContentBlock } from '@deepseek-ai/dsh-sdk-client'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { z } from 'zod'
 import { IMAGE_LIMITS, type PaperTaskImageReceipt } from '../../app/utils/paper-task-image-contract'
 import type { PaperTaskProviderSettings } from '../../app/utils/paper-task-provider-contract'
-import type { PaperTaskStage } from '../../app/utils/paper-task-contract'
+import { PAPER_TASK_QUALITY_LIMITS, type PaperTaskStage } from '../../app/utils/paper-task-contract'
 import type { PaperTaskBranchResult, PaperTaskCloseResult, PaperTaskRuntime, PaperTaskRuntimeEvent, PaperTaskRuntimeOptions } from './runtime'
 import { verifyPinnedDsh } from './dsh-pin'
 import { preparePaperTaskImages, type PreparedPaperTaskImage } from './image-input'
 import { startPaperTaskImageGuard } from './image-request-guard'
 import { savePaperTaskImageReceipts } from './image-receipts'
+import { evaluateBranchQuality } from './branch-quality'
 import { hasSuccessfulBranchWrite, translationMasterMatches } from './branch-output'
 
 export interface DshRuntimeContext {
@@ -93,15 +93,15 @@ class DshPaperTaskRuntime implements PaperTaskRuntime {
         removeAbortListener = () => signal.removeEventListener('abort', abort)
       }
     })
-    const runTimer = setTimeout(() => { void this.close() }, 180000)
+    const runTimer = setTimeout(() => { void this.close() }, 300000)
     try {
       if (signal?.aborted) return []
       this.initializationPromise = this.initialize(signal)
       const initialized = await this.initializationPromise
       if (!initialized || signal?.aborted) return []
       const prompt = this.branch === 'deep-reading'
-        ? 'You are generating only the deep-reading branch. Call paper_task_read_input with no arguments first and follow its whole-paper task instructions. Read the complete pinned deep-reading SKILL.md and a suitable required framework reference, then discover and read every original source record completely with the supplied tools. Continue paged reads at nextOffset until totalBytes. Synthesize a connected natural Markdown report from the whole paper; include required claim_evidence entries that distinguish facts from inferences and link important passages to known verbatim source quotes. Save it as an unfinished preview with paper_task_write_branch and the identifiers of every source record read. Do not call any other tools.'
-        : `You are generating only the translation branch. Call paper_task_read_input with no arguments first and follow its whole-paper task instructions. Read the complete pinned translation SKILL.md; this task's instructions override conflicting general clauses. Discover the complete source index with paper_task_list_sources, paging until totalItems. Read every indexed source record completely, continuing each paged read at nextOffset until totalBytes. Produce one continuous natural Chinese Markdown master in single-column article order: body, appendices, footnotes, and figure/table captions. Keep reference entries in English. Never translate, rebuild, or redraw table contents; keep each table as its original asset with a translated caption using ![caption](asset:ASSET_ID). Formulas and algorithms may also keep their original assets. Use terminology consistently and preserve source numbers and units. For necessary missing or unrecoverable material, add a short reader-visible note (for example 待补 or 未核实) and list it in unresolved; never guess. Save with paper_task_write_branch using segments, terminology, and unresolved. Do not produce a bilingual layout or a fixed article template. Do not call any other tools.`
+        ? 'You are generating only the deep-reading branch. Call paper_task_read_input with no arguments first and follow its whole-paper task instructions. Read the complete pinned deep-reading SKILL.md and a suitable required framework reference, then discover and read every original source record completely with the supplied tools. Continue paged reads at nextOffset until totalBytes. Synthesize a connected natural Markdown report from the whole paper; include required claim_evidence entries that distinguish facts from inferences and link important passages to known verbatim source quotes. Save it as an unfinished preview with paper_task_write_branch and the identifiers of every source record read. After saving, call paper_task_read_branch and read the complete preview. Submit exactly one paper_task_submit_content_review with bounded findings; target_indexes refer to blank-line-separated paragraph indexes in the saved report. If any substantive finding remains, re-read every source record it cites and call paper_task_apply_local_repair at most once, changing only the cited paragraphs. Do not call paper_task_write_branch again, do not review twice, and do not claim completion; the application decides the final status.'
+        : `You are generating only the translation branch. Call paper_task_read_input with no arguments first and follow its whole-paper task instructions. Read the complete pinned translation SKILL.md; this task's instructions override conflicting general clauses. Discover the complete source index with paper_task_list_sources, paging until totalItems. Read every indexed source record completely, continuing each paged read at nextOffset until totalBytes. Produce one continuous natural Chinese Markdown master in single-column article order: body, appendices, footnotes, and figure/table captions. Keep reference entries in English. Never translate, rebuild, or redraw table contents; keep each table as its original asset with a translated caption using ![caption](asset:ASSET_ID). Formulas and algorithms may also keep their original assets. Use terminology consistently and preserve source numbers and units. For necessary missing or unrecoverable material, add a short reader-visible note (for example 待补 or 未核实) and list it in unresolved; never guess. Save with paper_task_write_branch using segments, terminology, and unresolved. Do not produce a bilingual layout or a fixed article template. After saving, call paper_task_read_branch and read the complete preview. Submit exactly one paper_task_submit_content_review with bounded findings; target_indexes refer to saved segment indexes. If any substantive finding remains, re-read every source record it cites and call paper_task_apply_local_repair at most once, changing only the cited segments. Do not call paper_task_write_branch again, do not review twice, and do not claim completion; the application decides the final status.`
       const promptBlocks: SdkPromptContentBlock[] = [{ type: 'text', text: prompt }]
       for (const image of this.preparedImages) {
         promptBlocks.push({ type: 'text', text: image.context })
@@ -122,11 +122,20 @@ class DshPaperTaskRuntime implements PaperTaskRuntime {
       } else if (readFileSync(join(this.branchRoot, 'preview.md'), 'utf8') !== markdown) {
         return []
       }
-      if (!hasSuccessfulBranchWrite(outcome, markdown, this.branch)) return []
+      if (!hasSuccessfulBranchWrite(outcome, markdown, this.branch, this.branchRoot)) return []
+      const quality = evaluateBranchQuality(this.context.workspaceRoot, this.branch)
+      if (quality.status === 'failed') return []
       const paragraphs = markdown.split(/\n\s*\n/).map((part) => part.trim())
         .filter((part) => part.length > 0).slice(0, 8).map((part) => part.slice(0, 2000))
       if (paragraphs.length === 0) throw new Error('paper task produced no bounded preview paragraphs')
-      events.push({ type: 'generated-preview', markdown, paragraphs })
+      events.push({
+        type: 'generated-preview', markdown, paragraphs,
+        quality: {
+          status: quality.status,
+          issues: quality.issues.map((issue) => issue.message).slice(0, PAPER_TASK_QUALITY_LIMITS.maxIssues),
+          options: [...quality.options],
+        },
+      })
       events.push({ type: 'progress', stage: 'generating', completed: 1, total: 1 })
       return events
     } catch {

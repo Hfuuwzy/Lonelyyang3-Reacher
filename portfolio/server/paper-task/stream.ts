@@ -189,7 +189,8 @@ function markUnfinished(
   state: 'cancelled' | 'failed' | 'sample-ready',
 ): void {
   for (const branch of selected) {
-    if (branches[branch] !== 'sample-ready' && branches[branch] !== 'preview-ready' && branches[branch] !== 'failed') {
+    if (branches[branch] !== 'sample-ready' && branches[branch] !== 'preview-ready'
+      && branches[branch] !== 'needs-confirmation' && branches[branch] !== 'complete' && branches[branch] !== 'failed') {
       branches[branch] = state
     }
   }

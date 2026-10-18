@@ -9,6 +9,10 @@ import { createHash } from 'node:crypto'
  * original asset, kept as an English reference entry, or declared unresolved
  * with a short actionable reason.
  *
+ * `inspectTranslationMaster` separates unsafe input (which throws) from
+ * quality findings (which are returned). The strict wrapper throws the first
+ * finding so existing publication callers keep their fail-closed behavior.
+ *
  * These checks are structural and presence-based. They are not proof of
  * sentence-level accuracy or translation quality.
  */
@@ -27,10 +31,14 @@ const VISUAL_KINDS = new Set(['table', 'formula', 'algorithm'])
 const TEXT_KINDS = new Set(['heading', 'body', 'appendix', 'footnote', 'figure'])
 const DISCLOSURE_CUE = /待补|待确认|未完成|未核实|无法恢复|缺失|无法读取/u
 
-export function validateTranslationMaster(args, context) {
+export function inspectTranslationMaster(args, context) {
   const { records, state, indexIds, sourceRevision } = context
   const byId = new Map(records.map((stored) => [stored.record.id, stored]))
   const indexed = new Set(indexIds)
+  const issues = []
+  const addIssue = (code, message, recordIds = []) => {
+    issues.push({ code, message, severity: 'substantive', recordIds: [...new Set(recordIds)] })
+  }
   if (!Array.isArray(args.segments) || args.segments.length < 1 || args.segments.length > MAX_SEGMENTS) {
     throw new Error('translation needs bounded natural segments')
   }
@@ -56,7 +64,8 @@ export function validateTranslationMaster(args, context) {
     for (const assetId of assetIdsIn(text)) {
       const asset = state.assets.find((candidate) => candidate.id === assetId)
       if (asset === undefined || asset.availability !== 'available' || !indexed.has(asset.recordId)) {
-        throw new Error('translation references an unavailable or foreign asset')
+        addIssue('asset-invalid', 'translation references an unavailable or foreign asset', asset === undefined ? [] : [asset.recordId])
+        continue
       }
       referencedAssetIds.add(assetId)
       if (!recordIds.includes(asset.recordId)) recordIds.push(asset.recordId)
@@ -69,10 +78,16 @@ export function validateTranslationMaster(args, context) {
     for (const recordId of recordIds) {
       const record = byId.get(recordId)?.record
       if (record === undefined) throw new Error('translation segment source record is unavailable')
-      if (record.kind === 'gap') throw new Error('unrecoverable source records cannot be translated')
-      if (record.state !== 'present') throw new Error('ambiguous or missing source records need an unresolved reason')
+      if (record.kind === 'gap') {
+        addIssue('gap-translated', 'unrecoverable source records cannot be translated', [recordId])
+        continue
+      }
+      if (record.state !== 'present') {
+        addIssue('ambiguous-translated', 'ambiguous or missing source records need an unresolved reason', [recordId])
+        continue
+      }
       if (REFERENCE_KINDS.has(record.kind) && !includesNormalized(text, record.text)) {
-        throw new Error('reference entries must keep their original English text')
+        addIssue('reference-translated', 'reference entries must keep their original English text', [recordId])
       }
     }
     markdown += `${markdown === '' ? '' : '\n\n'}${text}`
@@ -85,37 +100,45 @@ export function validateTranslationMaster(args, context) {
   const unresolvedIds = new Set(unresolved.map((item) => item.recordId))
   for (const recordId of unresolvedIds) {
     const record = byId.get(recordId)?.record
-    if (coveredIds.has(recordId)) throw new Error('a source record cannot be both translated and unresolved')
+    if (coveredIds.has(recordId)) addIssue('covered-and-unresolved', 'a source record cannot be both translated and unresolved', [recordId])
     if (record?.kind === 'reference' && record.state === 'present') {
-      throw new Error('present reference entries must be preserved, not marked unresolved')
+      addIssue('reference-unresolved', 'present reference entries must be preserved, not marked unresolved', [recordId])
     }
   }
   for (const stored of records) {
     const record = stored.record
     if (unresolvedIds.has(record.id)) continue
-    if (record.kind === 'gap') throw new Error('unrecoverable source records need an unresolved reason')
+    if (record.kind === 'gap') {
+      addIssue('gap-unresolved', 'unrecoverable source records need an unresolved reason', [record.id])
+      continue
+    }
     if (record.kind === 'figure') {
       const asset = state.assets.find((candidate) => candidate.recordId === record.id)
       if (asset?.availability === 'available' && !referencedAssetIds.has(asset.id)) {
-        throw new Error('every retained figure needs its original asset in the master')
+        addIssue('figure-unreferenced', 'every retained figure needs its original asset in the master', [record.id])
       }
     }
     if (VISUAL_KINDS.has(record.kind)) {
       const asset = state.assets.find((candidate) => candidate.recordId === record.id)
       if (asset === undefined || asset.availability !== 'available' || !referencedAssetIds.has(asset.id)) {
-        throw new Error('every visual source record needs its original asset or an unresolved reason')
+        addIssue('visual-unreferenced', 'every visual source record needs its original asset or an unresolved reason', [record.id])
       }
+    }
+  }
+  for (const asset of state.assets) {
+    if (asset.availability !== 'available' && !unresolvedIds.has(asset.recordId)) {
+      addIssue('asset-unavailable', 'a source asset is unavailable; the corresponding material must be declared unresolved', [asset.recordId])
     }
   }
   for (const id of indexed) {
     if (!coveredIds.has(id) && !unresolvedIds.has(id)) {
-      throw new Error('every indexed source record must be translated, preserved, or marked unresolved')
+      addIssue('record-uncovered', 'every indexed source record must be translated, preserved, or marked unresolved', [id])
     }
   }
 
-  verifyNumericPreservation(byId, coveredIds, markdown)
-  verifySourceFullness(byId, coveredIds, markdown)
-  const terminology = parseTerminology(args.terminology, byId, markdown)
+  verifyNumericPreservation(byId, segments, addIssue)
+  verifySourceFullness(byId, coveredIds, markdown, addIssue)
+  const terminology = inspectTerminology(args.terminology, byId, markdown, addIssue)
   const assets = state.assets
     .filter((asset) => referencedAssetIds.has(asset.id))
     .map((asset) => ({
@@ -125,9 +148,9 @@ export function validateTranslationMaster(args, context) {
       caption: assetCaption(byId.get(asset.recordId)?.record),
       availability: asset.availability,
     }))
-  const status = unresolved.length > 0 || state.status !== 'complete' ? 'incomplete' : 'complete'
+  const status = unresolved.length > 0 || state.status !== 'complete' || issues.length > 0 ? 'incomplete' : 'complete'
   if (status === 'incomplete' && !DISCLOSURE_CUE.test(markdown)) {
-    throw new Error('incomplete translation must disclose what needs confirmation in the reader text')
+    addIssue('disclosure-missing', 'incomplete translation must disclose what needs confirmation in the reader text')
   }
 
   return {
@@ -142,7 +165,15 @@ export function validateTranslationMaster(args, context) {
       unresolved,
       assets,
     },
+    issues,
   }
+}
+
+export function validateTranslationMaster(args, context) {
+  const result = inspectTranslationMaster(args, context)
+  const first = result.issues[0]
+  if (first !== undefined) throw new Error(first.message)
+  return { markdown: result.markdown, metadata: result.metadata }
 }
 
 function assetIdsIn(markdown) {
@@ -176,17 +207,22 @@ function parseUnresolved(value, indexed) {
   })
 }
 
-function parseTerminology(value, byId, markdown) {
+function inspectTerminology(value, byId, markdown, addIssue) {
   if (value === undefined) return []
-  if (!Array.isArray(value) || value.length > MAX_TERMS) throw new Error('translation terminology is invalid')
+  if (!Array.isArray(value) || value.length > MAX_TERMS) {
+    addIssue('terminology-invalid', 'translation terminology is invalid')
+    return []
+  }
   const seen = new Set()
   const compact = markdown.replace(/\s+/gu, '')
-  return value.map((item) => {
+  const terms = []
+  for (const item of value) {
     if (item === null || typeof item !== 'object'
       || typeof item.source !== 'string' || item.source.trim().length === 0 || item.source.length > 120
       || typeof item.target !== 'string' || item.target.trim().length === 0 || item.target.length > 120
       || seen.has(item.source.trim())) {
-      throw new Error('translation terminology entry is invalid or duplicated')
+      addIssue('terminology-invalid', 'translation terminology entry is invalid or duplicated')
+      continue
     }
     const source = item.source.trim()
     const target = item.target.trim()
@@ -194,11 +230,13 @@ function parseTerminology(value, byId, markdown) {
       TEXT_KINDS.has(stored.record.kind) && normalized(stored.record.text).includes(normalized(source)),
     )
     if (!appearsInSource || !compact.includes(target.replace(/\s+/gu, ''))) {
-      throw new Error('translation terminology is not grounded in the source and master')
+      addIssue('terminology-ungrounded', 'translation terminology is not grounded in the source and master')
+      continue
     }
     seen.add(source)
-    return { source, target }
-  })
+    terms.push({ source, target })
+  }
+  return terms
 }
 
 function assetCaption(record) {
@@ -206,22 +244,36 @@ function assetCaption(record) {
   return (firstLine || `原文${record.kind}`).slice(0, 500)
 }
 
-function verifyNumericPreservation(byId, coveredIds, markdown) {
-  const compactMaster = markdown.replace(/\s+/gu, '')
-  for (const recordId of coveredIds) {
+function verifyNumericPreservation(byId, segments, addIssue) {
+  const byRecord = new Map()
+  for (const segment of segments) {
+    for (const dependency of segment.dependencies) {
+      const texts = byRecord.get(dependency.recordId) ?? []
+      texts.push(segment.markdown.replace(/\s+/gu, ''))
+      byRecord.set(dependency.recordId, texts)
+    }
+  }
+  for (const [recordId, compactSegments] of byRecord) {
     const record = byId.get(recordId)?.record
     if (record === undefined || !TEXT_KINDS.has(record.kind)) continue
-    for (const match of record.text.matchAll(/\d+(?:[.,]\d+)*\s*%?/gu)) {
+    for (const match of numericSourceText(record).matchAll(/\d+(?:[.,]\d+)*\s*%?/gu)) {
       const token = match[0].replace(/\s+/gu, '')
       const escaped = token.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
-      if (!new RegExp(`(?:^|[^\\d.,])${escaped}(?![\\d.,])`, 'u').test(compactMaster)) {
-        throw new Error('translation dropped or changed a source number or unit')
+      const pattern = new RegExp(`(?:^|[^\\d.,])${escaped}(?![\\d.,])`, 'u')
+      if (!compactSegments.some((text) => pattern.test(text))) {
+        addIssue('number-mismatch', 'translation dropped or changed a source number or unit', [recordId])
       }
     }
   }
 }
 
-function verifySourceFullness(byId, coveredIds, markdown) {
+function numericSourceText(record) {
+  if (record.kind === 'heading') return record.text.replace(/^\d+(?:\.\d+)*\.?\s+/u, '')
+  if (record.kind === 'footnote') return record.text.replace(/^\d+\s+/u, '')
+  return record.text
+}
+
+function verifySourceFullness(byId, coveredIds, markdown, addIssue) {
   let sourceCharacters = 0
   for (const recordId of coveredIds) {
     const record = byId.get(recordId)?.record
@@ -230,7 +282,7 @@ function verifySourceFullness(byId, coveredIds, markdown) {
   if (sourceCharacters < 200) return
   const masterCharacters = markdown.replace(/\s+/gu, '').length
   if (masterCharacters < sourceCharacters * 0.25) {
-    throw new Error('translation master is too short to cover the translated source text')
+    addIssue('master-too-short', 'translation master is too short to cover the translated source text')
   }
 }
 
