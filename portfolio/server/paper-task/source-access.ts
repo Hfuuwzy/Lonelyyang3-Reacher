@@ -22,6 +22,7 @@ export function paperTaskSourceView(taskId: string, stored: StoredSource): Paper
       caption: (record.text.trim().split('\n')[0] || `原文${record.kind}`).slice(0, 500),
       availability: asset.availability === 'available' ? 'available' as const : 'missing' as const,
       understanding: 'unverified' as const,
+      inputs: (stored.imageInputs ?? []).filter((input) => input.assetId === asset.id && input.recordId === asset.recordId).slice(0, 2),
     }]
   })
   const overflowed = sourceGaps.length > 100 || sourceAssets.length > 100

@@ -6,6 +6,8 @@ import type {
   PaperTaskSourceAsset,
   PaperTaskSourceRecord,
 } from '../../app/utils/paper-task-source-contract'
+import type { PaperTaskImageReceipt } from '../../app/utils/paper-task-image-contract'
+import { readPaperTaskImageReceipts } from './image-receipts'
 import { workspacePaths } from './workspace'
 
 export type StoredSourceRecord = {
@@ -26,6 +28,7 @@ export type StoredSource = {
   readonly source: Omit<PaperTaskSource, 'records'> & { readonly records: readonly (PaperTaskSourceRecord & { readonly revision: number })[] }
   readonly revision: number
   readonly assets: readonly PublicSourceAsset[]
+  readonly imageInputs?: readonly PaperTaskImageReceipt[]
 }
 
 type AssetEntry = {
@@ -116,6 +119,7 @@ export function createPaperTaskSourceStore() {
       },
       revision: state.revision,
       assets: [...state.assets.values()].map((entry) => entry.publicAsset),
+      imageInputs: readPaperTaskImageReceipts(root, [...state.records.values()], [...state.assets.values()].map(({ publicAsset }) => publicAsset)),
     }
   }
 
