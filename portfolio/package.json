@@ -10,7 +10,8 @@
     "postinstall": "nuxt prepare",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
-    "test": "npm run test:unit"
+    "test": "npm run test:unit",
+    "paper-review:local": "node scripts/paper-review-local.mjs"
   },
   "dependencies": {
     "@deepseek-ai/dsh-sdk-client": "0.1.7-rc.2",
@@ -22,12 +23,17 @@
     "better-sqlite3": "^12.11.1",
     "nuxt": "^4.4.8",
     "pdfjs-dist": "6.3.289",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.0",
+    "unified": "^11.0.5",
     "vue": "^3.5.39",
     "vue-router": "^5.1.0",
     "zod": "3.25.76"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
+    "jiti": "2.7.0",
     "typescript": "6.0.3",
     "vitest": "^4.1.10"
   }

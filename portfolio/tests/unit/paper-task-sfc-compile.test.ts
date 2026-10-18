@@ -7,9 +7,11 @@ import { compileScript, compileTemplate, parse } from '@vue/compiler-sfc'
 // directly to keep the dev-only UI syntax-valid in the unit suite.
 const SFC_PATHS = [
   'app/pages/prototype/paper-task.vue',
+  'app/pages/prototype/paper-task-reader-fixture.vue',
   'app/pages/prototype/api-settings.vue',
   'app/components/prototype/PaperTaskApiSettings.vue',
   'app/components/prototype/PaperTaskTranslationPreview.vue',
+  'app/components/prototype/PaperTaskReader.vue',
 ] as const
 
 describe('paper-task SFC compilation', () => {

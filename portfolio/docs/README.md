@@ -6,6 +6,8 @@
 |---|---|---|
 | [`../../README.md`](../../README.md) | 使用者与新贡献者 | 工作区布局、安装、运行和测试命令。 |
 | [`../DESIGN.md`](../DESIGN.md) | UI 开发者 | 视觉令牌、布局、组件、响应式和素材合同。 |
+| [`paper-reader-prototype.md`](paper-reader-prototype.md) | 原型维护者 | Nuxt 内论文阅读原型的开发用法、比较布局与边界。 |
+| [`paper-task-generation.md`](paper-task-generation.md) | 论文任务维护者 | 固定 DSH 文本预览、任务资源快照、受控工具、C 专注阅读接入和验证边界。 |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 开发者与未来维护者 | 运行时结构、数据流、扩展方法和技术债务。 |
 
 代码和测试始终是最终事实来源；上述文档应随代码变更就地更新。

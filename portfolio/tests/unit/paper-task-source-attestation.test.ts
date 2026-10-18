@@ -26,6 +26,9 @@ describe('prepared source route admission', () => {
     ['GET', `${base}/source`],
     ['PATCH', `${base}/source`],
     ['GET', `${base}/translation`],
+    ['GET', `${base}/reader`],
+    ['GET', `${base}/pdf/original`],
+    ['GET', `${base}/pdf/translated`],
     ['GET', `${base}/assets/asset-${'a'.repeat(32)}`],
   ])('attests only the exact %s prepared-material route', async (method, path) => {
     const { req, event } = request(method, path)
@@ -40,6 +43,8 @@ describe('prepared source route admission', () => {
     ['GET', '/api/prototype/paper-task/not-a-uuid/translation'],
     ['GET', `${base}/assets/../original.pdf`],
     ['GET', '/api/prototype/paper-task/not-a-uuid/source'],
+    ['GET', `${base}/pdf/other`],
+    ['POST', `${base}/reader`],
     ['GET', `${base}/assets/asset-${'a'.repeat(32)}/extra`],
   ])('does not attest an unsupported %s route', async (method, path) => {
     const { req, event } = request(method, path)

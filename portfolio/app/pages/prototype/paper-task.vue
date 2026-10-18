@@ -1,5 +1,11 @@
 <template>
-  <section class="paper-task" aria-labelledby="paper-task-title">
+  <PaperTaskReader
+    v-if="readerOpen && readerView !== null"
+    :view="readerView"
+    @close="readerOpen = false"
+  />
+
+  <section v-else class="paper-task" aria-labelledby="paper-task-title">
     <header class="paper-task__heading">
       <p class="paper-task__stamp" aria-hidden="true">原型</p>
       <h1 id="paper-task-title" class="paper-task__title">论文任务工作台</h1>
@@ -15,6 +21,9 @@
       </p>
       <NuxtLink class="paper-task__settings-link" :to="localePath('/prototype/api-settings')">
         论文任务 API 设置
+      </NuxtLink>
+      <NuxtLink class="paper-task__settings-link" :to="localePath('/prototype/paper-review')">
+        ← 返回论文审阅工作台
       </NuxtLink>
     </header>
 
@@ -96,6 +105,15 @@
         </p>
       </div>
       <div class="paper-task__actions">
+        <button
+          v-if="readerView !== null && readerView.documents.length > 0"
+          type="button"
+          class="paper-task__button"
+          :disabled="actionPending !== null"
+          @click="readerOpen = true"
+        >
+          进入专注阅读
+        </button>
         <button type="button" class="paper-task__button" :disabled="actionPending !== null" @click="handleDelete">
           {{ actionPending === 'delete' ? '正在删除…' : '删除任务资料' }}
         </button>
@@ -135,12 +153,14 @@
 </template>
 
 <script setup lang="ts">
+import PaperTaskReader from '~/components/prototype/PaperTaskReader.vue'
 import PaperTaskSourceMaterials from '~/components/prototype/PaperTaskSourceMaterials.vue'
 import PaperTaskTranslationPreview from '~/components/prototype/PaperTaskTranslationPreview.vue'
+import { usePaperTaskReader } from '~/composables/paper-task-reader'
 import { usePaperTaskWorkbench } from '~/composables/paper-task-workbench'
 import { PAPER_TASK_BRANCHES } from '~/utils/paper-task-contract'
 
-definePageMeta({ layout: 'default' })
+definePageMeta({ layout: false })
 
 const {
   pdfFile,
@@ -166,6 +186,10 @@ const {
 
 const localePath = useLocalePath()
 const allBranches = computed(() => PAPER_TASK_BRANCHES)
+const reader = usePaperTaskReader(taskId, computed(() => phase.value === 'result'))
+const readerView = computed(() => reader.state.value.kind === 'loaded' ? reader.state.value.view : null)
+const readerOpen = ref(false)
+const readerAutoOpened = ref(false)
 const translationMasterTaskId = ref<string | null>(null)
 const translationReady = computed(() => phase.value === 'result'
   && (branchStates.value.translation === 'preview-ready'
@@ -182,7 +206,19 @@ const visiblePreviewCards = computed(() => previewCards.value.filter((preview) =
 
 watch(taskId, () => {
   translationMasterTaskId.value = null
+  readerAutoOpened.value = false
+  readerOpen.value = false
 })
+
+watch(
+  () => reader.state.value,
+  (state) => {
+    if (state.kind === 'loaded' && state.view.documents.length > 0 && !readerAutoOpened.value) {
+      readerAutoOpened.value = true
+      readerOpen.value = true
+    }
+  },
+)
 
 function onPdfChange(event: Event): void {
   const target = event.target

@@ -38,6 +38,9 @@ import { createPaperTaskSourceStore, type StoredSource } from './source-store'
 import { correctPaperTaskSource, type PaperTaskCorrection, type PaperTaskCorrectionResult } from './source-correction'
 import { readPaperTaskTranslation } from './translation-access'
 import type { PaperTaskTranslationView } from '../../app/utils/paper-task-translation-contract'
+import { readPaperTaskReader } from './reader-access'
+import { readPaperTaskOriginalPdf, readPaperTaskTranslatedPdf } from './pdf-access'
+import type { PaperTaskReaderView } from '../../app/utils/paper-task-reader-contract'
 
 const SAFE_CREATE_MESSAGE = '任务工作区创建失败，请稍后重试。'
 const SAFE_SELECTION_MESSAGE = '任务分支选择不受支持，请选择翻译、深读或两者。'
@@ -60,6 +63,9 @@ export interface PaperTaskService {
   remove(taskId: string): Promise<PaperTaskActionResult>
   source(taskId: string): StoredSource | undefined
   translation(taskId: string): PaperTaskTranslationView | undefined
+  reader(taskId: string): PaperTaskReaderView | undefined
+  originalPdf(taskId: string): Uint8Array | undefined
+  translatedPdf(taskId: string): Uint8Array | undefined
   asset(taskId: string, assetId: string): Uint8Array | undefined
   correctSource(taskId: string, input: PaperTaskCorrection): PaperTaskCorrectionResult
 }
@@ -180,6 +186,29 @@ export function createPaperTaskService(
     return readPaperTaskTranslation(taskId, handle.workspaceRoot)
   }
 
+  function reader(taskId: string): PaperTaskReaderView | undefined {
+    if (deleting.has(taskId)) return undefined
+    const handle = store.get(taskId)
+    if (handle === undefined) return undefined
+    const stored = sourceStore.read(taskId, handle.workspaceRoot)
+    if (stored === undefined) return undefined
+    return readPaperTaskReader(taskId, handle.workspaceRoot, handle.branches, stored)
+  }
+
+  function originalPdf(taskId: string): Uint8Array | undefined {
+    if (deleting.has(taskId)) return undefined
+    const handle = store.get(taskId)
+    if (handle === undefined) return undefined
+    return readPaperTaskOriginalPdf(handle.workspaceRoot)
+  }
+
+  function translatedPdf(taskId: string): Uint8Array | undefined {
+    if (deleting.has(taskId)) return undefined
+    const handle = store.get(taskId)
+    if (handle === undefined || handle.branches.translation !== 'complete') return undefined
+    return readPaperTaskTranslatedPdf(handle.workspaceRoot, 'complete')
+  }
+
   function asset(taskId: string, assetId: string): Uint8Array | undefined {
     if (deleting.has(taskId)) return undefined
     return sourceStore.readAsset(taskId, workspaceRoot(taskId), assetId)
@@ -193,7 +222,7 @@ export function createPaperTaskService(
     return correctPaperTaskSource(sourceStore, taskId, handle.workspaceRoot, correction)
   }
 
-  return { submit, cancel, remove, source, translation, asset, correctSource }
+  return { submit, cancel, remove, source, translation, reader, originalPdf, translatedPdf, asset, correctSource }
 }
 
 /**

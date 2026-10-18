@@ -39,6 +39,8 @@ const PAPER_TASK_CANCEL_PATH_RE = /^\/api\/prototype\/paper-task\/([0-9a-f]{8}-[
 const PAPER_TASK_ID_PATH_RE = /^\/api\/prototype\/paper-task\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/
 const PAPER_TASK_SOURCE_PATH_RE = /^\/api\/prototype\/paper-task\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/source$/
 const PAPER_TASK_TRANSLATION_PATH_RE = /^\/api\/prototype\/paper-task\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/translation$/
+const PAPER_TASK_READER_PATH_RE = /^\/api\/prototype\/paper-task\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/reader$/
+const PAPER_TASK_PDF_PATH_RE = /^\/api\/prototype\/paper-task\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/pdf\/(?:original|translated)$/
 const PAPER_TASK_ASSET_PATH_RE = /^\/api\/prototype\/paper-task\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/assets\/asset-[0-9a-f]{32}$/
 const PAPER_TASK_SETTINGS_PATH = '/api/prototype/paper-task-settings'
 
@@ -64,6 +66,12 @@ function isAttestedRoute(method: string, pathname: string): boolean {
     return true
   }
   if (method === 'GET' && PAPER_TASK_TRANSLATION_PATH_RE.test(pathname)) {
+    return true
+  }
+  if (method === 'GET' && PAPER_TASK_READER_PATH_RE.test(pathname)) {
+    return true
+  }
+  if (method === 'GET' && PAPER_TASK_PDF_PATH_RE.test(pathname)) {
     return true
   }
   if (method === 'GET' && PAPER_TASK_ASSET_PATH_RE.test(pathname)) {

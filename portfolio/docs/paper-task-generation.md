@@ -27,11 +27,17 @@ These checks are structural and presence-based. They do not prove sentence-level
 
 ## Reader retrieval and freshness
 
-`GET /api/prototype/paper-task/<id>/translation` returns the complete master, referenced original assets, unresolved reasons, and stale paragraph indexes. The route uses the same local-development access gate and no-store headers as source retrieval. The task page renders the full master in continuous single-column order with its associated original charts; the bounded SSE excerpts remain only as a loading/fallback view and never replace a readable master.
+`GET /api/prototype/paper-task/<id>/translation` returns the complete master, referenced original assets, unresolved reasons, and stale paragraph indexes. The route uses the same local-development access gate and no-store headers as source retrieval.
+
+`GET /api/prototype/paper-task/<id>/reader` returns the C focused-reader view for the current task: one document for each readable selected branch (the translation master and/or the deep-reading report), the per-branch states, short honest notices, and two separate PDF entries. A failed or cancelled branch never hides a sibling result; only the retained Markdown that passes its publication hash check is exposed. The reader renders the first real `h1` as the single article title and builds the table of contents only from the document's actual `h2`/`h3` headings.
+
+The task page opens this reader when a result arrives. It keeps the continuous single-column Chinese article at roughly 760px with 20px desktop / 18px mobile serif text, uses a centered 1240px toolbar, and hides the workbench's technical diagnostics while reading. The modal table-of-contents drawer supports Tab focus wrapping, Escape close, focus restoration, background inertness, and reduced-motion settings. Raw HTML and MDC stay inert; only task-owned `asset:<id>` images resolve, Markdown tables scroll inside their own wrapper, and math delimiters are shown as inert text. Missing content gets one short actionable notice instead of a source-position or per-unit wall.
+
+The original upload is served from `GET /api/prototype/paper-task/<id>/pdf/original`. A translated PDF is served from `GET /api/prototype/paper-task/<id>/pdf/translated` only when the branch is complete, `pdf-format.json` passes the format gate, the artifact hashes match the approved master, and every page check is `passed` or `minor`. Open and download use the same route (download adds `?download=1`), so they resolve the same retained file; the original PDF is never substituted for a translation. Until an export implementation builds a qualified artifact, the translated entry stays disabled with a short status.
 
 A local source correction updates only the affected source records and context, then marks only ledger segments that depend on a changed record stale. Unaffected segment text and the master bytes stay unchanged; the master condition becomes `needs-update` until a later review/repair workflow handles it. Automatic retranslation is not triggered by a correction, and this ticket does not introduce a quality-approved final state.
 
-Deep reading remains independent: it neither requires translation nor is blocked by translation failure, and a deep-reading failure does not hide a readable translation master.
+Deep reading remains independent: it neither requires translation nor is blocked by translation failure, and a deep-reading failure does not hide a readable translation master. Task results stay under the project-local retained workspace and the dev-only `/prototype` routes; they are not written into the public blog collections.
 
 ## Provider settings and lifecycle
 
