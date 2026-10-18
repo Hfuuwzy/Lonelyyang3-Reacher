@@ -39,17 +39,18 @@ function classify(text: string, y: number, inReferences: boolean): PaperTaskSour
   const line = text.trim()
   if (/^(?:appendix|appendices)\b/i.test(line)) return 'appendix'
   if (/^(?:references|bibliography|works cited)$/i.test(line)) return 'heading'
+  if (inReferences) return 'reference'
   if (/^algorithm\s+\d*\s*[:.]/i.test(line)) return 'algorithm'
   if (/^table\s+\d*\s*[:.]/i.test(line)) return 'table'
+  if (/^(?:figure|fig\.)\s*\d{1,4}\s*[.:|]/i.test(line)) return 'figure'
   if (/\([^)]*\d+[^)]*\)\s*$/.test(line) && /[=<>±×÷∑∫√^]/u.test(line)) return 'formula'
-  if (/^[\[({]?[A-Za-z0-9]+[\])}.]\s/.test(line) && inReferences) return 'reference'
   if (y < 90 && /^(?:\d+|[*†‡])\s/.test(line)) return 'footnote'
   if (/^(?:\d+(?:\.\d+)*\.?\s+[A-Z]|appendix\s+[A-Z])/i.test(line)) return 'heading'
   if (/[=<>±×÷∑∫√^]/u.test(line) && line.length < 180) return 'formula'
   return 'body'
 }
 
-async function linesForPage(page: PDFPageProxy): Promise<readonly Line[]> {
+async function linesForPage(page: PDFPageProxy, initialInReferences = false): Promise<{ readonly lines: readonly Line[]; readonly inReferences: boolean }> {
   const content = await page.getTextContent()
   const runs: TextRun[] = []
   for (const item of content.items) {
@@ -101,7 +102,7 @@ async function linesForPage(page: PDFPageProxy): Promise<readonly Line[]> {
       - Math.min(...captionedGridRows.flatMap(([, row]) => row.map((run) => run.x))) + 24,
     Math.min(pageHeight, pageHeight - gridBottom + 52) - Math.max(0, captionTop - 16),
   ] as const
-  let inReferences = false
+  let inReferences = initialInReferences
   let inAlgorithm = false
   let previousContextLine: Line | undefined
   let unsupportedTable = false
@@ -112,6 +113,7 @@ async function linesForPage(page: PDFPageProxy): Promise<readonly Line[]> {
     const tableCaptionLine = /^table\s+\d*\s*[:.]/i.test(text)
     if (tableCaptionLine) unsupportedTable = baseline !== captionBaseline
     if (/^(?:references|bibliography|works cited)$/i.test(text)) inReferences = true
+    if (/^(?:appendix|appendices)\b/i.test(text)) inReferences = false
     if (/^algorithm\s+\d*\s*[:.]/i.test(text)) inAlgorithm = true
     if (!/^\d+[.)]\s/.test(text)
       && /^(?:\d+(?:\.\d+)*\.?\s+[A-Z]|appendix\s+[A-Z]|references|bibliography)$/i.test(text)) {
@@ -147,12 +149,21 @@ async function linesForPage(page: PDFPageProxy): Promise<readonly Line[]> {
       Math.max(bbox[0] + bbox[2], formulaContext[0] + formulaContext[2]) - Math.min(bbox[0], formulaContext[0]),
       Math.max(bbox[1] + bbox[3], formulaContext[1] + formulaContext[3]) - Math.min(bbox[1], formulaContext[1]),
     ] as const
+    const kind = inTableBand || unsupportedTableRow ? 'table' : inAlgorithm && /^\d+[.)]/.test(text)
+      ? 'algorithm' : classify(text, baseline, inReferences)
+    const retainedBbox = kind === 'figure'
+      ? [
+          Math.max(0, left - 36),
+          Math.max(0, top - 320),
+          Math.min(viewport.width, right + 36) - Math.max(0, left - 36),
+          Math.min(top, 320),
+        ] as const
+      : cropBbox
     const line: Line = {
       text,
       runs: orderedRuns,
-      bbox: cropBbox,
-      kind: inTableBand || unsupportedTableRow ? 'table' : inAlgorithm && /^\d+[.)]/.test(text)
-        ? 'algorithm' : classify(text, baseline, inReferences),
+      bbox: retainedBbox,
+      kind,
       state: captionOnlyTable || unsupportedTableRow || overlapping || (gridBounds === undefined && gridRows.some(([gridBaseline]) => gridBaseline === baseline))
         ? 'ambiguous' : 'present',
     }
@@ -180,7 +191,7 @@ async function linesForPage(page: PDFPageProxy): Promise<readonly Line[]> {
       state: previous.state === 'ambiguous' || line.state === 'ambiguous' ? 'ambiguous' : 'present',
     }
   }
-  return consolidated.map((line) => {
+  const finalized = consolidated.map((line) => {
     if (line.kind !== 'table' || line.state !== 'present') return line
     const left = Math.min(...line.runs.map((run) => run.x)) - 4
     const top = pageHeight - Math.max(...line.runs.map((run) => run.y + run.height)) - 4
@@ -188,6 +199,7 @@ async function linesForPage(page: PDFPageProxy): Promise<readonly Line[]> {
     const bottom = pageHeight - Math.min(...line.runs.map((run) => run.y)) + 6
     return { ...line, bbox: [left, top, right - left, bottom - top] as const }
   })
+  return { lines: finalized, inReferences }
 }
 
 export async function extractSourceRecords(document: PDFDocumentProxy): Promise<PaperTaskSource> {
@@ -196,9 +208,12 @@ export async function extractSourceRecords(document: PDFDocumentProxy): Promise<
   let context = ''
   let incomplete = false
   let needsConfirmation = false
+  let inReferences = false
   for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
     const page = await document.getPage(pageNumber)
-    const lines = await linesForPage(page)
+    const pageLines = await linesForPage(page, inReferences)
+    inReferences = pageLines.inReferences
+    const lines = pageLines.lines
     if (lines.length === 0) {
       incomplete = true
       records.push({

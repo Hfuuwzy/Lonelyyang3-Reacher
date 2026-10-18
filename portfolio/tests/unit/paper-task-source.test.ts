@@ -104,6 +104,45 @@ describe('preparePaperTaskSource', () => {
     expect(result.source.status).toBe('incomplete')
   })
 
+  it('keeps bibliographic continuation lines on later pages as English references', async () => {
+    // Given references that continue across a page boundary.
+    const bytes = buildSamplePdf([
+      { lines: ['References', '1. Smith, J. (2020). First study.'] },
+      { lines: ['Continuation of the second entry.', '2. Doe, A. (2021). Second study.'] },
+    ])
+
+    // When the source is prepared.
+    const result = await preparePaperTaskSource(bytes)
+    if (!result.success) throw new Error('controlled bibliography document failed preparation')
+
+    // Then continuation lines stay references instead of becoming body text.
+    const references = result.source.records.filter((record) => record.kind === 'reference')
+    expect(references.map((record) => record.text)).toEqual([
+      '1. Smith, J. (2020). First study.',
+      'Continuation of the second entry.',
+      '2. Doe, A. (2021). Second study.',
+    ])
+  })
+
+  it('retains a figure caption with an original region crop', async () => {
+    // Given a page with body text above a figure caption.
+    const bytes = buildSamplePdf([{ lines: [
+      'Body line one.', 'Body line two.', 'Body line three.', 'Body line four.',
+      'Body line five.', 'Body line six.', 'Figure 1: Trend by group', 'Body after the figure.',
+    ] }])
+
+    // When the source is prepared.
+    const result = await preparePaperTaskSource(bytes)
+    if (!result.success) throw new Error('controlled figure document failed preparation')
+
+    // Then the caption is translatable and its region is retained as an original asset.
+    const figure = result.source.records.find((record) => record.kind === 'figure')
+    expect(figure?.text).toContain('Figure 1')
+    const asset = result.assets.find((candidate) => candidate.recordId === figure?.id)
+    expect(asset?.availability).toBe('available')
+    expect(asset?.bbox[3]).toBeGreaterThan(0)
+  })
+
   it('returns cancellation for a pre-aborted request without reading PDF data', async () => {
     // Given a pre-aborted request.
     const controller = new AbortController()

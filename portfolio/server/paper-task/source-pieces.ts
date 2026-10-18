@@ -40,7 +40,7 @@ export function validateWorkerPreview(
   for (const workerPiece of parsed.data.pieces) {
     const source = records.get(workerPiece.recordId)
     if (source === undefined || source.record.state !== 'present' || workerPiece.paragraphIndex >= parsed.data.paragraphs.length
-      || !['heading', 'body', 'appendix', 'footnote', 'reference'].includes(source.record.kind)
+      || !['heading', 'body', 'appendix', 'footnote', 'figure', 'reference'].includes(source.record.kind)
       || usedParagraphs.has(workerPiece.paragraphIndex)
       || usedRecords.has(workerPiece.recordId)) return undefined
     const contextRecord = [...sourceRecords].reverse().find((candidate) =>

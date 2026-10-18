@@ -79,6 +79,10 @@ async function renderPage(
         assets.push(unavailable(record))
         continue
       }
+      if (record.kind === 'figure' && record.bbox[3] < 40) {
+        assets.push(unavailable(record))
+        continue
+      }
       const scaledBbox = record.bbox.map((value) => value * outputScale)
       const [sourceX, sourceY, sourceWidth, sourceHeight] = record.bbox
       if (sourceX < 0 || sourceY < 0 || sourceX + sourceWidth > baseViewport.width
@@ -124,7 +128,7 @@ export async function renderSourceAssets(
   signal?: AbortSignal,
 ): Promise<readonly PaperTaskSourceAsset[]> {
   const visualRecords = records.filter((record) =>
-    record.kind === 'table' || record.kind === 'formula' || record.kind === 'algorithm',
+    record.kind === 'figure' || record.kind === 'table' || record.kind === 'formula' || record.kind === 'algorithm',
   )
   const assets: PaperTaskSourceAsset[] = []
   let totalBytes = 0

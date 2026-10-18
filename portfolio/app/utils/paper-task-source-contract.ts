@@ -4,6 +4,7 @@ export const PAPER_TASK_SOURCE_KINDS = [
   'appendix',
   'footnote',
   'reference',
+  'figure',
   'table',
   'formula',
   'algorithm',
