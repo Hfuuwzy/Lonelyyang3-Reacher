@@ -9,7 +9,7 @@ import type {
   PaperTaskProviderSettings,
 } from '../../app/utils/paper-task-provider-contract'
 
-const EMPTY_STATUS = { configured: false, apiKeyConfigured: false } as const satisfies PaperTaskProviderPublicStatus
+const EMPTY_STATUS = { configured: false, imageInput: false, apiKeyConfigured: false } as const satisfies PaperTaskProviderPublicStatus
 
 const CONFIGURED_STATUS = {
   configured: true,
@@ -17,6 +17,7 @@ const CONFIGURED_STATUS = {
   baseUrl: 'https://api.example.test/v1',
   protocol: 'openai-completions',
   model: 'model-a',
+  imageInput: false,
   apiKeyConfigured: true,
 } as const satisfies PaperTaskProviderPublicStatus
 
@@ -45,9 +46,14 @@ function createHarness(
         baseUrl: settings.baseUrl,
         protocol: settings.protocol,
         model: settings.model,
+        imageInput: settings.imageInput,
         apiKeyConfigured: settings.apiKey.length > 0,
       }
-      return { ok: true, body: { configured: true, apiKeyConfigured: activeStatus.apiKeyConfigured } }
+      return { ok: true, body: {
+        configured: true,
+        imageInput: activeStatus.imageInput,
+        apiKeyConfigured: activeStatus.apiKeyConfigured,
+      } }
     },
     async delete() {
       clearCount += 1
@@ -105,7 +111,7 @@ describe('paper-task API settings', () => {
 
   it('rejects configured status that omits required provider fields', async () => {
     // Given a configured response without the fields required for safe display.
-    const harness = createHarness(EMPTY_STATUS, null, { configured: true, apiKeyConfigured: false })
+    const harness = createHarness(EMPTY_STATUS, null, { configured: true, imageInput: false, apiKeyConfigured: false })
 
     // When the page loads settings.
     await harness.mount()
@@ -137,6 +143,7 @@ describe('paper-task API settings', () => {
       baseUrl: 'https://api.example.test/v1',
       protocol: 'openai-responses',
       model: 'model-b',
+      imageInput: false,
       apiKey: 'transient-key',
     }])
     expect(harness.settings.form.apiKey).toBe('')
@@ -149,6 +156,7 @@ describe('paper-task API settings', () => {
     // Given a ready form for a provider that does not require an API key.
     const harness = createHarness()
     await harness.mount()
+    expect(harness.settings.form.imageInput).toBe(false)
     harness.settings.form.providerLabel = 'Public endpoint'
     harness.settings.form.baseUrl = 'https://api.example.test/v1'
     harness.settings.form.protocol = 'anthropic-messages'
@@ -159,13 +167,44 @@ describe('paper-task API settings', () => {
 
     // Then the empty key is accepted and the public status reports no configured key.
     expect(harness.appliedSettings[0]?.apiKey).toBe('')
+    expect(harness.appliedSettings[0]?.imageInput).toBe(false)
     expect(harness.settings.status.value?.configured).toBe(true)
+    expect(harness.settings.status.value?.imageInput).toBe(false)
     expect(harness.settings.status.value?.apiKeyConfigured).toBe(false)
+  })
+
+  it('submits and adopts an enabled image input declaration', async () => {
+    // Given a ready form with the image input declaration enabled.
+    const harness = createHarness()
+    await harness.mount()
+    harness.settings.form.providerLabel = 'Local provider'
+    harness.settings.form.baseUrl = 'https://api.example.test/v1'
+    harness.settings.form.model = 'model-a'
+    harness.settings.form.imageInput = true
+
+    // When the setting is applied.
+    await harness.settings.handleApply()
+
+    // Then the request and adopted public status both retain the enabled declaration.
+    expect(harness.appliedSettings[0]?.imageInput).toBe(true)
+    expect(harness.settings.status.value?.imageInput).toBe(true)
+    expect(harness.settings.form.imageInput).toBe(true)
+  })
+
+  it('loads the declared image input flag from public status', async () => {
+    // Given a configured public status with image input explicitly enabled.
+    const harness = createHarness({ ...CONFIGURED_STATUS, imageInput: true })
+
+    // When the page loads settings.
+    await harness.mount()
+
+    // Then the editable setting reflects the public declaration.
+    expect(harness.settings.form.imageInput).toBe(true)
   })
 
   it('clears server settings and the editable values', async () => {
     // Given a configured provider loaded from the server.
-    const harness = createHarness(CONFIGURED_STATUS)
+    const harness = createHarness({ ...CONFIGURED_STATUS, imageInput: true })
     await harness.mount()
 
     // When the user clears settings.
@@ -175,6 +214,8 @@ describe('paper-task API settings', () => {
     expect(harness.clearCount).toBe(1)
     expect(harness.settings.status.value).toEqual(EMPTY_STATUS)
     expect(harness.settings.form.providerLabel).toBe('')
+    expect(harness.settings.form.imageInput).toBe(false)
+    expect(harness.settings.status.value?.imageInput).toBe(false)
     expect(harness.settings.form.apiKey).toBe('')
   })
 

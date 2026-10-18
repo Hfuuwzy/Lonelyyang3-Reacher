@@ -40,6 +40,7 @@ export interface PaperTaskApiSettingsForm {
   baseUrl: string
   protocol: PaperTaskProviderSettings['protocol']
   model: string
+  imageInput: boolean
   apiKey: string
 }
 
@@ -74,6 +75,7 @@ export function usePaperTaskApiSettings(
     baseUrl: '',
     protocol: 'openai-completions',
     model: '',
+    imageInput: false,
     apiKey: '',
   })
   const phase = ref<PaperTaskApiSettingsPhase>('loading')
@@ -101,6 +103,7 @@ export function usePaperTaskApiSettings(
 
   function adoptStatus(nextStatus: PaperTaskProviderPublicStatus): void {
     status.value = nextStatus
+    form.imageInput = nextStatus.imageInput
     if (!nextStatus.configured) {
       return
     }
@@ -154,6 +157,7 @@ export function usePaperTaskApiSettings(
       baseUrl: form.baseUrl,
       protocol: form.protocol,
       model: form.model,
+      imageInput: form.imageInput,
       apiKey: form.apiKey,
     })
     form.apiKey = ''
@@ -174,7 +178,12 @@ export function usePaperTaskApiSettings(
         return
       }
       const savedStatus = response.ok ? parsePaperTaskPublicStatus(response.body) : null
-      if (savedStatus === null || !savedStatus.configured || savedStatus.apiKeyConfigured !== expectedKeyConfigured) {
+      if (
+        savedStatus === null
+        || !savedStatus.configured
+        || savedStatus.apiKeyConfigured !== expectedKeyConfigured
+        || savedStatus.imageInput !== submittedSettings.imageInput
+      ) {
         phase.value = 'error'
         notice.value = 'apply-failed'
         return
@@ -222,7 +231,7 @@ export function usePaperTaskApiSettings(
         return
       }
       const clearedStatus = response.ok ? parsePaperTaskPublicStatus(response.body) : null
-      if (clearedStatus === null || clearedStatus.configured || clearedStatus.apiKeyConfigured) {
+      if (clearedStatus === null || clearedStatus.configured || clearedStatus.imageInput || clearedStatus.apiKeyConfigured) {
         phase.value = 'error'
         notice.value = 'clear-failed'
         return
@@ -232,6 +241,7 @@ export function usePaperTaskApiSettings(
       form.baseUrl = ''
       form.protocol = 'openai-completions'
       form.model = ''
+      form.imageInput = false
       form.apiKey = ''
       phase.value = 'ready'
       notice.value = 'cleared'
