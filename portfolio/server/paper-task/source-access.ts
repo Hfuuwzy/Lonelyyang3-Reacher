@@ -15,7 +15,7 @@ export function paperTaskSourceView(taskId: string, stored: StoredSource): Paper
   })
   const sourceAssets = stored.assets.flatMap((asset) => {
     const record = records.get(asset.recordId)
-    if (record === undefined || (record.kind !== 'table' && record.kind !== 'formula' && record.kind !== 'algorithm')) return []
+    if (record === undefined || (record.kind !== 'figure' && record.kind !== 'table' && record.kind !== 'formula' && record.kind !== 'algorithm')) return []
     return [{
       id: asset.id,
       kind: record.kind,

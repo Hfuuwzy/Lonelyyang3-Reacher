@@ -101,6 +101,7 @@ const materialState = usePaperTaskSourceMaterials(toRef(props, 'taskId'), toRef(
 const failedImageIds = ref<readonly PaperTaskSourceAssetId[]>([])
 
 const SOURCE_ASSET_KIND_LABELS = {
+  figure: '图像',
   table: '表格',
   formula: '公式',
   algorithm: '算法',

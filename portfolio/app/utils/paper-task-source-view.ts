@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { paperTaskImageReceiptSchema } from './paper-task-image-contract'
 
-const PAPER_TASK_SOURCE_ASSET_KINDS = ['table', 'formula', 'algorithm'] as const
+const PAPER_TASK_SOURCE_ASSET_KINDS = ['figure', 'table', 'formula', 'algorithm'] as const
 const PAPER_TASK_SOURCE_STATES = ['prepared', 'incomplete'] as const
 const PAPER_TASK_SOURCE_AVAILABILITIES = ['available', 'missing'] as const
 

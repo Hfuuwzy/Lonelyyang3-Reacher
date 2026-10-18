@@ -51,6 +51,17 @@ describe('paper task source view projection', () => {
     expect(view?.gaps[0]?.reason).toBe('原文页面未能读取。')
   })
 
+  it('accepts a retained figure crop in the reader projection', () => {
+    // Given a source view carrying a figure asset.
+    const payload = response({ assets: [{ ...SOURCE_VIEW.assets[0], id: 'figure-1', kind: 'figure' }] })
+
+    // When it is projected for the expected task.
+    const view = projectPaperTaskSourceView(payload, TASK_ID)
+
+    // Then the original figure crop is accepted alongside tables and formulas.
+    expect(view?.assets[0]).toMatchObject({ id: 'figure-1', kind: 'figure' })
+  })
+
   it('rejects an input receipt that names a different asset', () => {
     // Given an asset whose input receipt references another asset id.
     const payload = response({
