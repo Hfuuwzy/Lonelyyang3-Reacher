@@ -38,6 +38,10 @@
           <dt>API 密钥</dt>
           <dd>{{ status.apiKeyConfigured ? '已配置' : '未配置（无需密钥）' }}</dd>
         </div>
+        <div class="paper-task-api-settings__status-row">
+          <dt>图像输入能力（提供方声明）</dt>
+          <dd>{{ status.imageInput ? '已声明开启（未逐端点验证）' : '未开启' }}</dd>
+        </div>
       </dl>
     </section>
 
@@ -97,6 +101,18 @@
       </div>
 
       <div class="paper-task-api-settings__field">
+        <label class="paper-task-api-settings__checkbox-label" for="paper-task-provider-image-input">
+          <input
+            id="paper-task-provider-image-input"
+            v-model="form.imageInput"
+            type="checkbox"
+            :disabled="phase !== 'ready'"
+          />
+          <span>图像输入能力（提供方声明，尚未逐端点验证）</span>
+        </label>
+      </div>
+
+      <div class="paper-task-api-settings__field">
         <label for="paper-task-provider-api-key">API 密钥</label>
         <input
           id="paper-task-provider-api-key"
@@ -135,8 +151,9 @@
     <section class="paper-task-api-settings__disclosure" aria-labelledby="paper-task-api-disclosure-title">
       <h3 id="paper-task-api-disclosure-title" class="paper-task-api-settings__section-title">发送内容与费用</h3>
       <p>
-        任务会发送论文原文文字、任务指令、实际加载的技能与参考资料，以及受控工具结果。本票不发送图像。
+        任务会发送论文原文文字、任务指令、实际加载的技能与参考资料，以及受控工具结果。启用图像输入后，任务会在应用边界内发送原始表格、公式与算法 PNG 裁剪及对应的原始上下文；不保证所有素材都会发送，请查阅各素材状态。
       </p>
+      <p>图像输入开关只记录提供方的能力声明，尚未逐端点验证。</p>
       <p>
         密钥只经当前同源的本机服务提交，并仅保留在服务端内存；不会写入浏览器存储、任务资料、日志或版本库，服务进程重启后设置即消失。
       </p>

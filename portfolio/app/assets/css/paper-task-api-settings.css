@@ -88,7 +88,7 @@
   font-weight: 600;
 }
 
-.paper-task-api-settings__field input,
+.paper-task-api-settings__field input:not([type='checkbox']),
 .paper-task-api-settings__field select {
   box-sizing: border-box;
   inline-size: 100%;
@@ -99,6 +99,21 @@
   background: var(--paper-warm);
   color: var(--ink);
   font: inherit;
+}
+
+.paper-task-api-settings__checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-block-size: 2.75rem;
+}
+
+.paper-task-api-settings__checkbox-label input {
+  flex: none;
+  inline-size: 1rem;
+  block-size: 1rem;
+  margin: 0;
+  accent-color: var(--vermilion);
 }
 
 .paper-task-api-settings__field input::placeholder {
