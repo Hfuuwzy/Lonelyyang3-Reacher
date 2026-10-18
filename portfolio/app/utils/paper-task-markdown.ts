@@ -55,7 +55,7 @@ interface RenderOptions {
   readonly resolveAsset: PaperTaskAssetResolver
   readonly reader: boolean
   readonly math: boolean
-  readonly headingIds: Map<string, number>
+  readonly headingIds: Set<string>
   readonly headings: PaperTaskReaderHeading[]
   readonly state: RenderState
 }
@@ -105,29 +105,41 @@ function elementTextContent(node: Element): string {
 }
 
 /** github-slugger-style unique slug: keeps letters/numbers (incl. CJK), dashes for spaces. */
-function uniqueHeadingId(value: string, ids: Map<string, number>): string {
+function uniqueHeadingId(value: string, ids: Set<string>): string {
   const base = value
     .toLowerCase()
     .trim()
     .replace(/[^\p{Letter}\p{Number}\s_-]/gu, '')
     .replace(/[\s_]+/g, '-')
     .replace(/-{2,}/g, '-')
-    .replace(/^-+|-+$/g, '')
-  const root = base === '' ? 'section' : base
-  const count = ids.get(root) ?? 0
-  ids.set(root, count + 1)
-  return count === 0 ? root : `${root}-${count}`
+    .replace(/^-+|-+$/g, '') || 'section'
+  let candidate = base
+  let suffix = 1
+  while (ids.has(candidate)) {
+    candidate = `${base}-${suffix}`
+    suffix += 1
+  }
+  ids.add(candidate)
+  return candidate
 }
 
-/** Inert visible math: source text is escaped, never interpreted as markup. */
+/** Inert visible math: every non-math segment is escaped, never interpreted as markup. */
 function renderTextWithMath(value: string, options: RenderOptions): string {
   if (!options.math) return escapeHtml(value)
-  return value.replace(MATH_TOKEN, (_match: string, block: string | undefined, inline: string | undefined) => {
-    if (block !== undefined) {
-      return `<span class="paper-task-reader__math paper-task-reader__math--block" role="math">${escapeHtml(block.trim())}</span>`
+  let out = ''
+  let lastIndex = 0
+  for (const match of value.matchAll(MATH_TOKEN)) {
+    const index = match.index ?? 0
+    out += escapeHtml(value.slice(lastIndex, index))
+    if (match[1] !== undefined) {
+      out += `<span class="paper-task-reader__math paper-task-reader__math--block" role="math">${escapeHtml(match[1].trim())}</span>`
+    } else {
+      out += `<span class="paper-task-reader__math" role="math">${escapeHtml((match[2] ?? '').trim())}</span>`
     }
-    return `<span class="paper-task-reader__math" role="math">${escapeHtml((inline ?? '').trim())}</span>`
-  })
+    lastIndex = index + match[0].length
+  }
+  out += escapeHtml(value.slice(lastIndex))
+  return out
 }
 
 function renderChildren(children: readonly Nodes[] | undefined, options: RenderOptions, block = false): string {
@@ -243,7 +255,7 @@ export function renderPaperTaskTranslationMarkdown(
     resolveAsset,
     reader: false,
     math: false,
-    headingIds: new Map<string, number>(),
+    headingIds: new Set<string>(),
     headings: [],
     state: { title: null },
   }, true)
@@ -268,7 +280,7 @@ export function renderPaperTaskReaderMarkdown(
     resolveAsset,
     reader: true,
     math: true,
-    headingIds: new Map<string, number>(),
+    headingIds: new Set<string>(),
     headings,
     state,
   }, true)

@@ -9,7 +9,10 @@
  */
 
 import { z } from 'zod'
-import type { PaperTaskTranslationAssetKind } from './paper-task-translation-contract'
+import {
+  paperTaskControlledAssetSchema,
+  type PaperTaskTranslationAssetKind,
+} from './paper-task-translation-contract'
 
 export const PAPER_TASK_READING_STATUSES = ['preview', 'needs-confirmation'] as const
 export type PaperTaskReadingStatus = (typeof PAPER_TASK_READING_STATUSES)[number]
@@ -21,18 +24,11 @@ export const PAPER_TASK_READING_LIMITS = {
   maxAssets: 500,
 } as const
 
-const readingAssetSchema = z.object({
-  id: z.string().regex(/^asset-[0-9a-z]+$/u),
-  kind: z.enum(PAPER_TASK_READING_ASSET_KINDS),
-  caption: z.string().min(1).max(500),
-  availability: z.enum(['available', 'missing']),
-}).strict().readonly()
-
 export const paperTaskReadingViewSchema = z.object({
   taskId: z.string().uuid(),
   status: z.enum(PAPER_TASK_READING_STATUSES),
   markdown: z.string().min(1).max(PAPER_TASK_READING_LIMITS.maxMarkdownLength),
-  assets: z.array(readingAssetSchema).max(PAPER_TASK_READING_LIMITS.maxAssets).readonly(),
+  assets: z.array(paperTaskControlledAssetSchema).max(PAPER_TASK_READING_LIMITS.maxAssets).readonly(),
 }).strict().readonly()
 
 export type PaperTaskReadingView = z.infer<typeof paperTaskReadingViewSchema>

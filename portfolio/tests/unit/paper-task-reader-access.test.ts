@@ -42,7 +42,7 @@ describe('paper task reader view', () => {
         branch: 'deep-reading',
         status: 'needs-confirmation',
         markdown: REPORT,
-        notice: '报告保留了未完成或未核实材料；已有可读内容保留。',
+        notice: '报告保留了未完成或未核实材料；已有可读内容保留，请返回任务工作台核对原文资料。',
         assets: [],
       },
     ])
@@ -58,7 +58,7 @@ describe('paper task reader view', () => {
     }, storedSource())
 
     expect(view?.documents.map((document) => document.branch)).toEqual(['deep-reading'])
-    expect(view?.documents[0]?.status).toBe('preview')
+    expect(view?.documents[0]?.status).toBe('needs-confirmation')
   })
 
   it('does not surface a failed branch even when its files still exist', () => {
@@ -78,7 +78,17 @@ describe('paper task reader view', () => {
       'deep-reading': 'not-selected',
     }, storedSource())
 
-    expect(view?.documents[0]?.notice).toBe('原文修正后，部分段落可能已过期；已有可读内容保留。')
+    expect(view?.documents[0]?.notice).toBe('原文修正后，部分段落可能已过期；已有可读内容保留，请返回任务工作台核对原文资料。')
+  })
+
+  it('never labels a stale master as complete even when the branch state was complete', () => {
+    const root = fixture({ translationStatus: 'needs-update' })
+    const view = readPaperTaskReader(TASK_ID, root, {
+      translation: 'complete',
+      'deep-reading': 'not-selected',
+    }, storedSource())
+
+    expect(view?.documents[0]?.status).toBe('needs-confirmation')
   })
 
   it('offers the translated PDF only when the branch is complete and the page gate passes', () => {

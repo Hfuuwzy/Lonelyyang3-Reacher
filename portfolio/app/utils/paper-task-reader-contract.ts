@@ -11,7 +11,10 @@
 import { z } from 'zod'
 import { paperTaskStateSchema } from './paper-task-contract'
 import { PAPER_TASK_READING_LIMITS } from './paper-task-reading-contract'
-import { PAPER_TASK_TRANSLATION_LIMITS } from './paper-task-translation-contract'
+import {
+  PAPER_TASK_TRANSLATION_LIMITS,
+  paperTaskControlledAssetSchema,
+} from './paper-task-translation-contract'
 
 export const PAPER_TASK_READER_BRANCH_DOCUMENTS = ['translation', 'deep-reading'] as const
 export type PaperTaskReaderBranch = (typeof PAPER_TASK_READER_BRANCH_DOCUMENTS)[number]
@@ -25,16 +28,8 @@ export type PaperTaskPdfKind = (typeof PAPER_TASK_READER_PDF_KINDS)[number]
 export const PAPER_TASK_READER_LIMITS = {
   maxDocuments: 2,
   maxNoticeLength: 300,
-  maxAssetCaption: 500,
   maxPdfMessage: 300,
 } as const
-
-const readerAssetSchema = z.object({
-  id: z.string().regex(/^asset-[0-9a-z]+$/u),
-  kind: z.enum(['figure', 'table', 'formula', 'algorithm']),
-  caption: z.string().min(1).max(PAPER_TASK_READER_LIMITS.maxAssetCaption),
-  availability: z.enum(['available', 'missing']),
-}).strict().readonly()
 
 const readerDocumentSchema = z.object({
   branch: z.enum(PAPER_TASK_READER_BRANCH_DOCUMENTS),
@@ -44,7 +39,7 @@ const readerDocumentSchema = z.object({
     PAPER_TASK_TRANSLATION_LIMITS.maxMarkdownLength,
     PAPER_TASK_READING_LIMITS.maxMarkdownLength,
   )),
-  assets: z.array(readerAssetSchema).max(PAPER_TASK_TRANSLATION_LIMITS.maxAssets).readonly(),
+  assets: z.array(paperTaskControlledAssetSchema).max(PAPER_TASK_TRANSLATION_LIMITS.maxAssets).readonly(),
 }).strict().readonly()
 
 const pdfStateSchema = z.object({

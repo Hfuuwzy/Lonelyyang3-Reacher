@@ -37,6 +37,9 @@ const translationAssetSchema = z.object({
   availability: z.enum(['available', 'missing']),
 }).strict().readonly()
 
+/** Shared reader-facing controlled asset shape for task-owned original crops. */
+export const paperTaskControlledAssetSchema = translationAssetSchema
+
 const unresolvedSchema = z.object({
   recordId: z.string().regex(/^p\d+-r\d+$/),
   reason: z.string().min(1).max(500),

@@ -21,6 +21,8 @@ const fixtureMarkdown = [
   '',
   '<script>alert("unsafe")' + '</' + 'script>',
   '',
+  '\\<img src=x onerror=alert(1)>',
+  '',
   '::dangerous[prop]',
   '',
   '[危险链接](javascript:alert(1)) 与 [安全链接](https://example.com/paper)。',
@@ -76,7 +78,7 @@ const view: PaperTaskReaderView = {
     {
       branch: 'deep-reading',
       status: 'needs-confirmation',
-      notice: '报告保留了未完成或未核实材料；已有可读内容保留。',
+      notice: '报告保留了未完成或未核实材料；已有可读内容保留，请返回任务工作台核对原文资料。',
       markdown: secondMarkdown,
       assets: [],
     },

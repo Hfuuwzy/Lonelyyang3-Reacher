@@ -38,6 +38,12 @@ describe('paper-task reader Markdown rendering', () => {
     expect(rendered.html).toContain('<h2 id="方法-1">方法</h2>')
   })
 
+  it('reserves generated suffixes so a later explicit slug cannot collide', () => {
+    const rendered = renderPaperTaskReaderMarkdown('## A\n\n## A\n\n## A-1', resolveAsset)
+
+    expect(rendered.headings.map((heading) => heading.id)).toEqual(['a', 'a-1', 'a-1-1'])
+  })
+
   it('renders only a task-owned controlled image and keeps other image targets inert', () => {
     expect(renderPaperTaskReaderMarkdown('![表1](asset:asset-abc)', resolveAsset).html)
       .toBe(`<p><img src="${ASSET_URL}" alt="表1" loading="lazy" decoding="async"></p>`)
@@ -94,6 +100,13 @@ describe('paper-task reader Markdown rendering', () => {
     expect(rendered.html).toContain('<span class="paper-task-reader__math paper-task-reader__math--block" role="math">\\sum_{i=1}^{N} x_i</span>')
     expect(rendered.html).toContain('<span class="paper-task-reader__math" role="math">a &lt; b</span>')
     expect(rendered.html).not.toContain('<script')
+  })
+
+  it('escapes every non-math text segment before it reaches v-html', () => {
+    const html = renderPaperTaskReaderMarkdown('\\<img src=x onerror=alert(1)>', resolveAsset).html
+
+    expect(html).not.toContain('<img')
+    expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;')
   })
 
   it('does not treat prices without a closing delimiter as math', () => {

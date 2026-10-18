@@ -348,11 +348,6 @@ function observeToolbar(): void {
   }
 }
 
-watch(drawerOpen, (open) => {
-  if (typeof document === 'undefined') return
-  document.body.style.overflow = open ? 'hidden' : ''
-})
-
 onMounted(() => {
   observeToolbar()
   window.addEventListener('keydown', handleKeys)
@@ -367,7 +362,6 @@ onBeforeUnmount(() => {
   titleObserver?.disconnect()
   toolbarObserver?.disconnect()
   stopActiveBranchWatch?.()
-  if (typeof document !== 'undefined') document.body.style.overflow = ''
   window.removeEventListener('keydown', handleKeys)
 })
 </script>
