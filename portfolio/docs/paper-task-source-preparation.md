@@ -5,8 +5,8 @@ This guide describes the local PDF source preparation and correction available o
 ## Current behavior
 
 - A submitted PDF is retained in a project-local task workspace. Source preparation extracts a minimal ordered JSON record per readable text line, including record ID, page, bounding box, kind, state, section/context, and links. Record `order` preserves natural reading order as extracted.
-- The record kinds include body, heading, appendix, footnote, reference, table, formula, and algorithm. Selectable text is not translated, interpreted, or rebuilt into a paper.
-- Table, formula, and algorithm source crops can be rendered as original PNG assets. Each asset carries page and bounding-box metadata and `understanding: unverified`. `available` means the PNG exists and passed basic asset checks, not that a model or person understood it.
+- The record kinds include body, heading, appendix, footnote, reference, figure caption, table, formula, and algorithm. Selectable text is not translated, interpreted, or rebuilt into a paper. Figure caption lines (`Figure N.` / `Fig. N:`) retain the page region above the caption as an unverified original PNG crop; if that region is too small or unavailable, essential figure content must remain an explicit unresolved item rather than being guessed.
+- Table, formula, algorithm, and retained figure source crops can be rendered as original PNG assets. Each asset carries page and bounding-box metadata and `understanding: unverified`. `available` means the PNG exists and passed basic asset checks, not that a model or person understood it.
 - Gaps record pages without recoverable selectable text; ambiguous records flag extraction that needs review. These are not repaired automatically.
 - A task may select translation, deep-reading, or both. The injectable sample runtime still shows unfinished original-text samples; the default service launches the pinned DSH runtime and shows natural Markdown as an unfinished `generated-preview`. Neither form is complete or quality-checked.
 
