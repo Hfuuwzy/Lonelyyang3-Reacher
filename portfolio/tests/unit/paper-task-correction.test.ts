@@ -1,6 +1,7 @@
 /// <reference types="node" />
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createPaperTaskService } from '../../server/paper-task/coordinator'
@@ -43,6 +44,45 @@ function correction(recordId: string, text: string) {
 }
 
 describe('paper task source corrections', () => {
+  it('marks only the translation master paragraphs that depend on a corrected record', async () => {
+    const { service, workspace } = await completedTask('translation')
+    const directory = join(workspace, 'drafts', 'translation')
+    const master = '# 主稿\n\n第一段译文。\n\n第二段译文。'
+    writeFileSync(join(directory, 'master.md'), master)
+    writeFileSync(join(directory, 'translation.json'), JSON.stringify({
+      version: 1,
+      status: 'complete',
+      sourceRevision: 1,
+      masterSha256: createHash('sha256').update(master).digest('hex'),
+      segments: [
+        { index: 0, markdown: '# 主稿\n\n第一段译文。', stale: false, dependencies: [{ recordId: 'p1-r1', revision: 1 }] },
+        { index: 1, markdown: '第二段译文。', stale: false, dependencies: [{ recordId: 'p1-r0', revision: 1 }] },
+      ],
+      terminology: [],
+      unresolved: [],
+      assets: [],
+    }))
+
+    expect(service.correctSource(ID, correction('p1-r1', 'Corrected body 47.5%.'))).toEqual({ kind: 'corrected', revision: 2 })
+
+    const metadata = JSON.parse(readFileSync(join(directory, 'translation.json'), 'utf8'))
+    expect(metadata).toMatchObject({ status: 'needs-update', sourceRevision: 2 })
+    expect(metadata.segments[0]).toMatchObject({ index: 0, stale: true, markdown: '# 主稿\n\n第一段译文。' })
+    expect(metadata.segments[1]).toMatchObject({ index: 1, stale: false, markdown: '第二段译文。' })
+    expect(readFileSync(join(directory, 'master.md'), 'utf8')).toBe(master)
+    expect(service.translation(ID)).toMatchObject({
+      status: 'needs-update', markdown: master, staleParagraphs: [0], unresolved: [], assets: [],
+    })
+
+    expect(service.correctSource(ID, {
+      expectedSourceRevision: 2,
+      corrections: [{ recordId: 'p1-r0', expectedRecordRevision: 1, text: '1 Overview revised' }],
+    })).toEqual({ kind: 'corrected', revision: 3 })
+    const second = JSON.parse(readFileSync(join(directory, 'translation.json'), 'utf8'))
+    expect(second).toMatchObject({ status: 'needs-update', sourceRevision: 3 })
+    expect(second.segments.map((segment: { readonly stale: boolean }) => segment.stale)).toEqual([true, true])
+  })
+
   it('changes only dependent source records and piece states while retaining original and draft bytes', async () => {
     const { service, workspace } = await completedTask()
     const original = readFileSync(join(workspace, 'original.pdf'))

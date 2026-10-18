@@ -29,6 +29,19 @@ const draftPieceSchema = z.object({
   stale: z.boolean(),
 }).strict()
 
+const translationMetadataSchema = z.object({
+  status: z.enum(['complete', 'incomplete', 'needs-update']),
+  sourceRevision: z.number().int().positive(),
+  segments: z.array(z.object({
+    index: z.number().int().nonnegative(),
+    markdown: z.string(),
+    stale: z.boolean(),
+    dependencies: z.array(z.object({ recordId: z.string().regex(/^p\d+-r\d+$/), revision: z.number().int().positive() }).strict()),
+  }).strict()).min(1),
+}).passthrough()
+
+type RetainedStaleUpdate = { readonly path: string; readonly contents: string }
+
 export function correctPaperTaskSource(
   store: ReturnType<typeof createPaperTaskSourceStore>,
   taskId: string,
@@ -80,12 +93,12 @@ export function correctPaperTaskSource(
     status: hasUnavailableAssets ? 'incomplete' as const : current.source.status,
     records: sourceRecords,
   }
-  const staleMetadata = findStalePieces(root, changed)
-  if (staleMetadata === undefined) return { kind: 'unavailable' }
   const nextRevision = current.revision + 1
+  const staleMetadata = findStalePieces(root, changed, nextRevision)
+  if (staleMetadata === undefined) return { kind: 'unavailable' }
   try {
     store.replace(taskId, root, nextSource, [...changed.values()], nextRevision)
-    for (const item of staleMetadata) writeFileSync(item.path, JSON.stringify(item.metadata))
+    for (const item of staleMetadata) writeFileSync(item.path, item.contents)
   } catch {
     store.fence(taskId, root)
     return { kind: 'unavailable' }
@@ -96,23 +109,53 @@ export function correctPaperTaskSource(
 function findStalePieces(
   root: string,
   changed: ReadonlyMap<string, StoredSourceRecord>,
-): readonly { readonly path: string; readonly metadata: z.infer<typeof draftPieceSchema> }[] | undefined {
+  nextRevision: number,
+): readonly RetainedStaleUpdate[] | undefined {
   const changedIds = new Set(changed.keys())
   const branches: readonly PaperTaskBranch[] = ['translation', 'deep-reading']
-  const stale: { path: string; metadata: z.infer<typeof draftPieceSchema> }[] = []
+  const stale: RetainedStaleUpdate[] = []
   try {
     for (const branch of branches) {
       const directory = join(workspacePaths(root).branchDirectories[branch], 'pieces')
       for (const filename of readdirSync(directory)) {
         if (!filename.endsWith('.json')) continue
-        const parsed = draftPieceSchema.safeParse(JSON.parse(readFileSync(join(directory, filename), 'utf8')))
+        const path = join(directory, filename)
+        const parsed = draftPieceSchema.safeParse(JSON.parse(readFileSync(path, 'utf8')))
         if (!parsed.success) return undefined
         if (parsed.data.stale || !parsed.data.dependencies.some((dependency) => changedIds.has(dependency.recordId))) continue
-        stale.push({ path: join(directory, filename), metadata: { ...parsed.data, stale: true } })
+        stale.push({ path, contents: JSON.stringify({ ...parsed.data, stale: true }) })
+      }
+    }
+    const translation = translationMetadata(root)
+    if (translation !== undefined) {
+      const affected = translation.segments.some((segment) =>
+        segment.dependencies.some((dependency) => changedIds.has(dependency.recordId)),
+      )
+      if (affected) {
+        const segments = translation.segments.map((segment) =>
+          segment.stale || !segment.dependencies.some((dependency) => changedIds.has(dependency.recordId))
+            ? segment
+            : { ...segment, stale: true },
+        )
+        stale.push({
+          path: join(workspacePaths(root).branchDirectories.translation, 'translation.json'),
+          contents: JSON.stringify({ ...translation, status: 'needs-update', sourceRevision: nextRevision, segments }),
+        })
       }
     }
     return stale
   } catch {
     return undefined
+  }
+}
+
+function translationMetadata(root: string): z.infer<typeof translationMetadataSchema> | undefined {
+  const path = join(workspacePaths(root).branchDirectories.translation, 'translation.json')
+  try {
+    const parsed = translationMetadataSchema.safeParse(JSON.parse(readFileSync(path, 'utf8')))
+    return parsed.success ? parsed.data : undefined
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return undefined
+    throw error
   }
 }
