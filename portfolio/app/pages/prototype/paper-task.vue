@@ -102,7 +102,14 @@
       </div>
     </div>
 
-    <article v-for="preview in previewCards" :key="preview.branch" class="paper-task__preview">
+    <PaperTaskTranslationPreview
+      v-if="taskId !== null"
+      :task-id="taskId"
+      :ready="phase === 'result' && branchStates.translation === 'preview-ready'"
+      @loaded="translationMasterTaskId = taskId"
+    />
+
+    <article v-for="preview in visiblePreviewCards" :key="preview.branch" class="paper-task__preview">
       <header class="paper-task__preview-heading">
         <h3>{{ branchLabel(preview.branch) }} {{ preview.headingLabel }}</h3>
         <p class="paper-task__preview-badge" :data-designation="preview.designation">{{ preview.badge }}</p>
@@ -122,6 +129,7 @@
 
 <script setup lang="ts">
 import PaperTaskSourceMaterials from '~/components/prototype/PaperTaskSourceMaterials.vue'
+import PaperTaskTranslationPreview from '~/components/prototype/PaperTaskTranslationPreview.vue'
 import { usePaperTaskWorkbench } from '~/composables/paper-task-workbench'
 import { PAPER_TASK_BRANCHES } from '~/utils/paper-task-contract'
 
@@ -151,6 +159,14 @@ const {
 
 const localePath = useLocalePath()
 const allBranches = computed(() => PAPER_TASK_BRANCHES)
+const translationMasterTaskId = ref<string | null>(null)
+const visiblePreviewCards = computed(() => previewCards.value.filter((preview) =>
+  !(preview.branch === 'translation' && translationMasterTaskId.value === taskId.value),
+))
+
+watch(taskId, () => {
+  translationMasterTaskId.value = null
+})
 
 function onPdfChange(event: Event): void {
   const target = event.target

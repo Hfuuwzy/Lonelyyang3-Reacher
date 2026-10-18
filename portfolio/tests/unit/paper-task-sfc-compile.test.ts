@@ -9,6 +9,7 @@ const SFC_PATHS = [
   'app/pages/prototype/paper-task.vue',
   'app/pages/prototype/api-settings.vue',
   'app/components/prototype/PaperTaskApiSettings.vue',
+  'app/components/prototype/PaperTaskTranslationPreview.vue',
 ] as const
 
 describe('paper-task SFC compilation', () => {
