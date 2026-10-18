@@ -2,13 +2,16 @@
   <section class="paper-task" aria-labelledby="paper-task-title">
     <header class="paper-task__heading">
       <p class="paper-task__stamp" aria-hidden="true">原型</p>
-      <h1 id="paper-task-title" class="paper-task__title">论文任务工作台<small>（受控文本预览）</small></h1>
+      <h1 id="paper-task-title" class="paper-task__title">论文任务工作台</h1>
       <p class="paper-task__lede">
-        单篇 PDF 选择翻译、深读或两者，任务只启动所选分支。此原型固定使用 DSH 0.1.7-rc.2，范围仅限文本预览。
+        单篇 PDF 选择翻译、深读或两者，任务只启动所选分支。此原型固定使用 DSH 0.1.7-rc.2。
         仅通过开发服务器提供，不属于生产站点内容。
       </p>
       <p class="paper-task__note">
-        卡片会区分 SAMPLE 与生成文本预览。预览未完成且未经质量检查，不代表翻译准确、内容完整或质量通过；本票不发送图像。
+        卡片会区分 SAMPLE 与生成文本预览。预览未完成且未经质量检查，不代表翻译准确、内容完整，也不能据此认定模型已完整理解图像或通过验收。
+      </p>
+      <p class="paper-task__note">
+        提供方图像输入能力仅为声明，尚未逐端点验证。启用后，任务会在应用边界内发送原始表格、公式与算法 PNG 裁剪及对应的原始上下文；不保证所有素材都会发送，请查阅各素材状态。
       </p>
       <NuxtLink class="paper-task__settings-link" :to="localePath('/prototype/api-settings')">
         论文任务 API 设置
