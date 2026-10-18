@@ -5,11 +5,13 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
+import { createCanvas } from '@napi-rs/canvas'
 import { createPaperTaskService, type PaperTaskService } from '../../server/paper-task/coordinator'
 import { clearPaperTaskProviderSettings, replacePaperTaskProviderSettings } from '../../server/paper-task/provider-settings'
 import { preparedExtractionFixture } from '../fixtures/paper-task-source'
 import type { PaperExtractionResult } from '../../server/utils/paper-review/pdf'
 import type { PaperTaskEvent } from '../../app/utils/paper-task-contract'
+import type { PaperTaskSourceResult } from '../../app/utils/paper-task-source-contract'
 
 const TASK_ID = '7e1f1b50-40ac-49f6-a4fb-7bf92945a22d'
 const EXPECTED_TOOLS = [
@@ -22,6 +24,13 @@ const EXPECTED_TOOLS = [
   'paper_task_write_branch',
 ]
 const MARKDOWN = '# Local fixture preview\n\nThis is an unfinished natural Markdown preview.'
+const cropCanvas = createCanvas(3, 2)
+const cropContext = cropCanvas.getContext('2d')
+cropContext.fillStyle = '#d43f3a'
+cropContext.fillRect(0, 0, 2, 2)
+cropContext.fillStyle = '#2d8a62'
+cropContext.fillRect(2, 0, 1, 2)
+const PNG = cropCanvas.toBuffer('image/png')
 const SKILL_ID = 'translation:SKILL.md'
 const RESOURCE_PAGE_BYTES = 4000
 const PLAN = [
@@ -86,12 +95,27 @@ describe('paper-task DSH integration', () => {
       pageCount: 1,
       pages: [{ readerPage: 1, lines: [{ text: 'Fixture source sentence.', isHeading: false }], headings: [], text: 'Fixture source sentence.' }],
     }
-    const prepareSource = async () => preparedExtractionFixture(extraction)
+    const prepareSource = async (): Promise<PaperTaskSourceResult> => {
+      const prepared = preparedExtractionFixture(extraction)
+      if (!prepared.success) return prepared
+      return {
+        success: true,
+        source: {
+          status: 'complete', pageCount: 1,
+          records: [
+            { id: 'p1-r0', order: 0, kind: 'body', text: 'Fixture source sentence.', state: 'present', page: 1, bbox: [0, 0, 1, 1], sectionId: null, context: 'Fixture source sentence.', links: [] },
+            { id: 'p1-r1', order: 1, kind: 'table', text: 'Table 1. Original outcomes.', state: 'present', page: 1, bbox: [12, 20, 240, 120], sectionId: null, context: 'Results section', links: [] },
+          ],
+        },
+        assets: [{ recordId: 'p1-r1', page: 1, bbox: [12, 20, 240, 120], availability: 'available', understanding: 'unverified', mediaType: 'image/png', bytes: PNG }],
+      }
+    }
     replacePaperTaskProviderSettings({
       providerLabel: 'Local protocol fixture',
       baseUrl,
       protocol: 'openai-completions',
       model: 'paper-task-fixture',
+      imageInput: true,
       apiKey: '',
     })
     const service = createPaperTaskService({ projectRoot: root, prepareSource, createId: () => TASK_ID })
@@ -103,6 +127,20 @@ describe('paper-task DSH integration', () => {
     const events = await collect(submission.events)
     const agentRequests = received.filter((body) => (body.tools ?? []).length > 0)
     expect(agentRequests.length).toBeGreaterThan(0)
+    const imageRequest = agentRequests.find((body) => body.messages?.some((message) => Array.isArray(message.content)
+      && message.content.some((block) => block !== null && typeof block === 'object' && 'type' in block && block.type === 'image_url')))
+    expect(imageRequest).toBeDefined()
+    const imageMessage = imageRequest?.messages?.find((message) => Array.isArray(message.content)
+      && message.content.some((block) => block !== null && typeof block === 'object' && 'type' in block && block.type === 'image_url'))
+    const contentBlocks = Array.isArray(imageMessage?.content) ? imageMessage.content : []
+    const imageIndex = contentBlocks.findIndex((block) => block !== null && typeof block === 'object' && 'type' in block && block.type === 'image_url')
+    const imageBlock = contentBlocks[imageIndex]
+    expect(imageBlock).toMatchObject({ type: 'image_url', image_url: { url: `data:image/png;base64,${PNG.toString('base64')}` } })
+    const requestText = contentBlocks.map((block) => block !== null && typeof block === 'object' && 'text' in block && typeof block.text === 'string' ? block.text : '').join('\n')
+    expect(requestText).toContain('"taskId":"' + TASK_ID + '"')
+    expect(requestText).toContain('"branch":"translation"')
+    expect(requestText).toContain('"recordId":"p1-r1"')
+    expect(requestText).toContain('"revision":1')
     const firstRequest = agentRequests[0]
     if (firstRequest?.tools === undefined) throw new Error('fixture did not receive tool definitions')
     const firstTools = firstRequest.tools.map((tool) => tool.function.name).sort()
@@ -120,8 +158,11 @@ describe('paper-task DSH integration', () => {
     const preview = events.find((event) => event.type === 'preview')
     expect(preview).toMatchObject({ type: 'preview', designation: 'generated-preview', paragraphs: [MARKDOWN.split('\n\n')[0], 'This is an unfinished natural Markdown preview.'] })
     expect(readFileSync(join(root, 'project-local', TASK_ID, 'drafts', 'translation', 'preview.md'), 'utf8')).toBe(MARKDOWN)
+    expect(existsSync(join(root, 'project-local', TASK_ID, 'assets'))).toBe(true)
+    expect(existsSync(join(root, 'runtime-local', TASK_ID, 'translation', 'attachments-home'))).toBe(false)
     expect(existsSync(join(root, 'project-local', TASK_ID, 'drafts', 'translation', 'pieces', 'translation-p1-r0.json'))).toBe(true)
     expect(existsSync(join(root, 'runtime-local', TASK_ID))).toBe(false)
+    expect(readFileSync(join(root, 'project-local', TASK_ID, 'drafts', 'translation', 'image-input.json'), 'utf8')).toContain('"status":"transported"')
     expect(await service.remove(TASK_ID)).toEqual({ ok: true, code: 'deleted' })
   }, 45000)
 })
