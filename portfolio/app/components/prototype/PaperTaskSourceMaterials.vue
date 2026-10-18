@@ -35,6 +35,20 @@
             <p class="paper-task-source-materials__asset-title">
               {{ assetKindLabel(asset.kind) }} · 模型理解未核验
             </p>
+            <ul class="paper-task-source-materials__inputs" aria-label="图像输入传输状态">
+              <li v-if="asset.inputs.length === 0" class="paper-task-source-materials__note">
+                {{ PAPER_TASK_IMAGE_NO_INPUTS_LABEL }}
+              </li>
+              <template v-else>
+                <li
+                  v-for="branch in PAPER_TASK_BRANCHES"
+                  :key="branch"
+                  class="paper-task-source-materials__note"
+                >
+                  {{ paperTaskImageInputLabel(branch, asset.inputs.find((receipt) => receipt.branch === branch)) }}
+                </li>
+              </template>
+            </ul>
             <figure class="paper-task-source-materials__figure">
               <img
                 v-if="asset.availability === 'available' && !failedImageIds.includes(asset.id)"
@@ -66,6 +80,11 @@
 <script setup lang="ts">
 import { ref, toRef, watch } from 'vue'
 import { usePaperTaskSourceMaterials } from '~/composables/paper-task-source-materials'
+import { PAPER_TASK_BRANCHES } from '~/utils/paper-task-contract'
+import {
+  PAPER_TASK_IMAGE_NO_INPUTS_LABEL,
+  paperTaskImageInputLabel,
+} from '~/utils/paper-task-image-labels'
 import {
   paperTaskSourceAssetPath,
   type PaperTaskSourceAssetId,
@@ -131,6 +150,7 @@ function recordImageError(assetId: PaperTaskSourceAssetId): void {
 
 .paper-task-source-materials__note,
 .paper-task-source-materials__gaps li,
+.paper-task-source-materials__inputs li,
 .paper-task-source-materials__caption {
   margin: 0;
   color: var(--ink-soft);
@@ -140,6 +160,7 @@ function recordImageError(assetId: PaperTaskSourceAssetId): void {
 }
 
 .paper-task-source-materials__gaps,
+.paper-task-source-materials__inputs,
 .paper-task-source-materials__assets {
   display: grid;
   gap: 0.75rem;
