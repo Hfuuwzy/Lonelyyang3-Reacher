@@ -23,7 +23,6 @@ const EXPECTED_TOOLS = [
   'paper_task_read_branch',
   'paper_task_write_branch',
 ]
-const MARKDOWN = '# Local fixture preview\n\nThis is an unfinished natural Markdown preview.'
 const cropCanvas = createCanvas(3, 2)
 const cropContext = cropCanvas.getContext('2d')
 cropContext.fillStyle = '#d43f3a'
@@ -37,6 +36,7 @@ const PLAN = [
   { tool: 'paper_task_read_input', arguments: {} },
   { tool: 'paper_task_list_sources', arguments: {} },
   { tool: 'paper_task_read_source', arguments: { record_id: 'p1-r0' } },
+  { tool: 'paper_task_read_source', arguments: { record_id: 'p1-r1' } },
   { tool: 'paper_task_list_resources', arguments: {} },
   { tool: 'paper_task_read_resource', arguments: { resource_id: SKILL_ID, offset: 0, limit_bytes: RESOURCE_PAGE_BYTES } },
 ] as const
@@ -156,11 +156,17 @@ describe('paper-task DSH integration', () => {
     const terminal = events.at(-1)
     expect(terminal).toMatchObject({ type: 'terminal', outcome: 'succeeded', branches: { translation: 'preview-ready', 'deep-reading': 'not-selected' }, cleanup: 'clean' })
     const preview = events.find((event) => event.type === 'preview')
-    expect(preview).toMatchObject({ type: 'preview', designation: 'generated-preview', paragraphs: [MARKDOWN.split('\n\n')[0], 'This is an unfinished natural Markdown preview.'] })
-    expect(readFileSync(join(root, 'project-local', TASK_ID, 'drafts', 'translation', 'preview.md'), 'utf8')).toBe(MARKDOWN)
+    expect(preview).toMatchObject({ type: 'preview', designation: 'generated-preview' })
+    if (preview?.type !== 'preview') throw new Error('fixture did not emit a preview event')
+    expect(preview.paragraphs[0]).toBe('# 未完成译文')
+    expect(preview.paragraphs[1]).toBe('Fixture source sentence.')
+    expect(preview.paragraphs[2]).toBe('Table 1: original outcomes.')
+    expect(preview.paragraphs[3]).toMatch(/^!\[Table 1: original outcomes\.\]\(asset:asset-[0-9a-f]+\)$/u)
+    const master = readFileSync(join(root, 'project-local', TASK_ID, 'drafts', 'translation', 'master.md'), 'utf8')
+    expect(master).toBe(preview.paragraphs.join('\n\n'))
+    expect(JSON.parse(readFileSync(join(root, 'project-local', TASK_ID, 'drafts', 'translation', 'translation.json'), 'utf8'))).toMatchObject({ status: 'complete', segments: [{ index: 0 }, { index: 1 }] })
     expect(existsSync(join(root, 'project-local', TASK_ID, 'assets'))).toBe(true)
     expect(existsSync(join(root, 'runtime-local', TASK_ID, 'translation', 'attachments-home'))).toBe(false)
-    expect(existsSync(join(root, 'project-local', TASK_ID, 'drafts', 'translation', 'pieces', 'translation-p1-r0.json'))).toBe(true)
     expect(existsSync(join(root, 'runtime-local', TASK_ID))).toBe(false)
     expect(readFileSync(join(root, 'project-local', TASK_ID, 'drafts', 'translation', 'image-input.json'), 'utf8')).toContain('"status":"transported"')
     expect(await service.remove(TASK_ID)).toEqual({ ok: true, code: 'deleted' })
@@ -182,7 +188,15 @@ function createFixtureAgent(): { readonly decide: (body: FixtureBody) => AgentDe
           return { tool: 'paper_task_read_resource', arguments: { resource_id: SKILL_ID, offset: page.nextOffset, limit_bytes: RESOURCE_PAGE_BYTES } }
         }
         step++
-        return { tool: 'paper_task_write_branch', arguments: { markdown: MARKDOWN, source_record_ids: ['p1-r0'] } }
+        const assetId = listedAssetId(body, 'p1-r1')
+        if (assetId === undefined) throw new Error('fixture did not receive a table asset')
+        return {
+          tool: 'paper_task_write_branch',
+          arguments: { segments: [
+            { markdown: '# 未完成译文\n\nFixture source sentence.', source_record_ids: ['p1-r0'] },
+            { markdown: `Table 1: original outcomes.\n\n![Table 1: original outcomes.](asset:${assetId})`, source_record_ids: ['p1-r1'] },
+          ] },
+        }
       }
       return { content: 'The retained branch preview is ready.' }
     },
@@ -237,6 +251,29 @@ function contentText(content: unknown): string {
     return blocks.map((block) => (block !== null && typeof block === 'object' && 'text' in block && typeof block.text === 'string' ? block.text : '')).join('')
   }
   return ''
+}
+
+function listedAssetId(body: FixtureBody, recordId: string): string | undefined {
+  const calls = new Map<string, string>()
+  for (const message of body.messages ?? []) {
+    if (message.role === 'assistant') {
+      for (const call of message.tool_calls ?? []) {
+        if (call.id !== undefined && call.function !== undefined) calls.set(call.id, call.function.name)
+      }
+    }
+    if (message.role !== 'tool' || message.tool_call_id === undefined || calls.get(message.tool_call_id) !== 'paper_task_list_sources') continue
+    try {
+      const parsed = z.object({
+        assets: z.array(z.object({ id: z.string(), recordId: z.string(), availability: z.string() }).passthrough()),
+      }).passthrough().safeParse(JSON.parse(contentText(message.content)))
+      if (!parsed.success) continue
+      const asset = parsed.data.assets.find((candidate) => candidate.recordId === recordId && candidate.availability === 'available')
+      if (asset !== undefined) return asset.id
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error
+    }
+  }
+  return undefined
 }
 
 function isAgentDecisionTool(decision: AgentDecision): decision is Extract<AgentDecision, { readonly tool: string }> {
