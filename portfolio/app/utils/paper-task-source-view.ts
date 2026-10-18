@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { paperTaskImageReceiptSchema } from './paper-task-image-contract'
 
 const PAPER_TASK_SOURCE_ASSET_KINDS = ['table', 'formula', 'algorithm'] as const
 const PAPER_TASK_SOURCE_STATES = ['prepared', 'incomplete'] as const
@@ -22,7 +23,19 @@ const paperTaskSourceAssetSchema = z.object({
   caption: z.string().min(1).max(500),
   availability: z.enum(PAPER_TASK_SOURCE_AVAILABILITIES),
   understanding: z.literal('unverified'),
-}).strict().readonly()
+  inputs: z.array(paperTaskImageReceiptSchema).max(2).default([]).readonly(),
+}).strict().superRefine((asset, ctx) => {
+    const branches = new Set<string>()
+    asset.inputs.forEach((input, index) => {
+      if (input.assetId !== asset.id) {
+        ctx.addIssue({ code: 'custom', message: 'receipt asset id does not match containing asset', path: [index, 'assetId'] })
+      }
+      if (branches.has(input.branch)) {
+        ctx.addIssue({ code: 'custom', message: 'duplicate receipt branch', path: [index, 'branch'] })
+      }
+      branches.add(input.branch)
+    })
+  }).readonly()
 
 export const paperTaskSourceViewSchema = z.object({
   taskId: paperTaskSourceTaskIdSchema,

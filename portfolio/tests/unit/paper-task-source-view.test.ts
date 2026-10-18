@@ -19,6 +19,7 @@ const SOURCE_VIEW = {
     caption: 'Table 2. Results',
     availability: 'available',
     understanding: 'unverified',
+    inputs: [],
   }],
 }
 
@@ -48,6 +49,46 @@ describe('paper task source view projection', () => {
     // Then only the validated source view is adopted.
     expect(view).toEqual(SOURCE_VIEW)
     expect(view?.gaps[0]?.reason).toBe('原文页面未能读取。')
+  })
+
+  it('rejects an input receipt that names a different asset', () => {
+    // Given an asset whose input receipt references another asset id.
+    const payload = response({
+      assets: [{
+        ...SOURCE_VIEW.assets[0],
+        id: 'asset-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        inputs: [{
+          branch: 'translation', assetId: 'asset-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+          recordId: 'p1-r0', revision: 1, status: 'transported', reason: null,
+        }],
+      }],
+    })
+
+    // When the source view is projected.
+    const view = projectPaperTaskSourceView(payload, TASK_ID)
+
+    // Then the foreign nested reference is rejected.
+    expect(view).toBeNull()
+  })
+
+  it('rejects two input receipts for the same branch', () => {
+    // Given an asset with two otherwise-valid receipts for its own id and branch.
+    const assetId = 'asset-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    const payload = response({
+      assets: [{
+        ...SOURCE_VIEW.assets[0],
+        id: assetId,
+        inputs: ['p1-r0', 'p2-r0'].map((recordId) => ({
+          branch: 'translation', assetId, recordId, revision: 1, status: 'transported', reason: null,
+        })),
+      }],
+    })
+
+    // When the source view is projected.
+    const view = projectPaperTaskSourceView(payload, TASK_ID)
+
+    // Then duplicate branch evidence is rejected.
+    expect(view).toBeNull()
   })
 
   it('rejects a valid response that belongs to a different task', () => {
