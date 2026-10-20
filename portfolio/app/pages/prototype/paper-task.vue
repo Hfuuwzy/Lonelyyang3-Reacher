@@ -27,18 +27,40 @@
       </NuxtLink>
     </header>
 
-    <form v-if="phase === 'idle' || phase === 'result'" class="paper-task__form" @submit.prevent="handleSubmit">
+    <form
+      v-if="phase === 'idle' || phase === 'result' || sourceFallbackAvailable"
+      class="paper-task__form"
+      @submit.prevent="handleSubmit"
+    >
+      <div v-if="!sourceFallbackAvailable" class="paper-task__field">
+        <label class="paper-task__label" for="paper-task-source-url">论文链接（当前支持 arXiv）</label>
+        <input
+          id="paper-task-source-url"
+          v-model.trim="sourceUrl"
+          class="paper-task__input"
+          type="url"
+          inputmode="url"
+          autocomplete="url"
+          placeholder="https://arxiv.org/abs/2404.05961"
+          :disabled="actionPending !== null || pdfFile !== null"
+        />
+        <p class="paper-task__note">仅获取你指定的一篇论文，不会搜索或推荐其他论文。也可直接上传 PDF。</p>
+      </div>
+
       <div class="paper-task__field">
-        <label class="paper-task__label" for="paper-task-pdf">论文 PDF</label>
+        <label class="paper-task__label" for="paper-task-pdf">
+          {{ sourceFallbackAvailable ? '上传 PDF 继续' : '或直接上传论文 PDF' }}
+        </label>
         <input
           id="paper-task-pdf"
           :key="taskId ?? 'pending-file'"
           class="paper-task__input"
           type="file"
           accept="application/pdf"
-          :disabled="actionPending !== null"
+          :disabled="actionPending !== null || (!sourceFallbackAvailable && sourceUrl.trim() !== '')"
           @change="onPdfChange"
         />
+        <p v-if="sourceFallbackAvailable" class="paper-task__note" role="status">{{ errorMessage }}</p>
       </div>
 
       <fieldset class="paper-task__field" :disabled="actionPending !== null">
@@ -56,13 +78,20 @@
       </p>
 
       <div class="paper-task__actions">
-        <button type="submit" class="paper-task__button" :disabled="pdfFile === null || actionPending !== null">
-          启动任务
+        <button
+          type="submit"
+          class="paper-task__button"
+          :disabled="(pdfFile === null && (sourceUrl.trim() === '' || sourceFallbackAvailable)) || actionPending !== null"
+        >
+          {{ sourceFallbackAvailable ? '使用 PDF 继续' : '启动任务' }}
+        </button>
+        <button v-if="sourceFallbackAvailable" type="button" class="paper-task__button" @click="handleResetError">
+          返回链接输入
         </button>
       </div>
     </form>
 
-    <div v-if="phase === 'error'" class="paper-task__error" role="alert">
+    <div v-if="phase === 'error' && !sourceFallbackAvailable" class="paper-task__error" role="alert">
       <p>{{ errorMessage }}</p>
       <div class="paper-task__actions">
         <button type="button" class="paper-task__button" :disabled="actionPending !== null" @click="handleResetError">返回</button>
@@ -164,6 +193,8 @@ definePageMeta({ layout: false })
 
 const {
   pdfFile,
+  sourceUrl,
+  sourceFallbackAvailable,
   selection,
   phase,
   taskId,
@@ -224,6 +255,7 @@ function onPdfChange(event: Event): void {
   const target = event.target
   if (target instanceof HTMLInputElement) {
     pdfFile.value = target.files?.[0] ?? null
+    if (pdfFile.value !== null) sourceUrl.value = ''
   }
 }
 </script>

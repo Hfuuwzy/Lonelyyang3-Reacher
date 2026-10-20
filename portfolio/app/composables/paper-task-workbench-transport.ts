@@ -5,11 +5,15 @@ import { consumePaperTaskStream } from '../utils/paper-task-stream'
 import type { PaperTaskStreamOutcome } from '../utils/paper-task-stream'
 
 export interface PaperTaskSubmitRequest {
-  readonly file: File
+  readonly source: PaperTaskSubmitSource
   readonly selection: PaperTaskSelection
   readonly signal: AbortSignal
   readonly onEvent: (event: PaperTaskEvent) => void
 }
+
+export type PaperTaskSubmitSource =
+  | { readonly kind: 'pdf'; readonly file: File }
+  | { readonly kind: 'url'; readonly url: string }
 
 export type PaperTaskSubmitResult =
   | { readonly kind: 'http-error'; readonly status: number }
@@ -33,7 +37,11 @@ export function createPaperTaskWorkbenchTransport(): PaperTaskWorkbenchTransport
   return {
     async submit(request) {
       const formData = new FormData()
-      formData.append('pdf', request.file)
+      if (request.source.kind === 'pdf') {
+        formData.append('pdf', request.source.file)
+      } else {
+        formData.append('sourceUrl', request.source.url)
+      }
       formData.append('selection', request.selection)
 
       const response: FetchResponse<ReadableStream<Uint8Array>> = await $fetch.raw('/api/prototype/paper-task', {

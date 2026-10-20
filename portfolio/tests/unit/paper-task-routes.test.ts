@@ -50,6 +50,29 @@ describe('parsePaperTaskMultipart — pdf + selection only', () => {
     }
   })
 
+  it('accepts one arXiv source link with the selected branch and no uploaded file', () => {
+    const result = parsePaperTaskMultipart([
+      field('sourceUrl', 'https://arxiv.org/abs/2404.05961'),
+      field('selection', 'deep-reading'),
+    ], 1024)
+
+    expect(result).toEqual({
+      success: true,
+      input: { pdf: null, sourceUrl: 'https://arxiv.org/abs/2404.05961', selection: 'deep-reading' },
+    })
+  })
+
+  it('rejects a request that supplies both a link and a PDF instead of choosing one source', () => {
+    const result = parsePaperTaskMultipart([
+      pdf(),
+      field('sourceUrl', 'https://arxiv.org/abs/2404.05961'),
+      field('selection', 'translation'),
+    ], 1024)
+
+    expect(result.success).toBe(false)
+    if (!result.success) expect(result.error.code).toBe('multiple-sources')
+  })
+
   it('rejects every field that is not pdf or selection', () => {
     for (const name of ['providerLabel', 'baseUrl', 'apiKey', 'protocol', 'model']) {
       const result = parsePaperTaskMultipart([...validParts(), field(name, 'secret')], 1024)
@@ -87,11 +110,11 @@ describe('parsePaperTaskMultipart — pdf + selection only', () => {
     }
   })
 
-  it('rejects a missing pdf, a missing selection, and an invalid selection', () => {
+  it('rejects a missing source, a missing selection, and an invalid selection', () => {
     const missingPdf = parsePaperTaskMultipart([field('selection', 'translation')], 1024)
     expect(missingPdf.success).toBe(false)
     if (!missingPdf.success) {
-      expect(missingPdf.error.code).toBe('missing-pdf')
+      expect(missingPdf.error.code).toBe('missing-source')
     }
     const missingSelection = parsePaperTaskMultipart([pdf()], 1024)
     expect(missingSelection.success).toBe(false)

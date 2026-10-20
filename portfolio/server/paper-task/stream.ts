@@ -7,7 +7,8 @@ import {
   type PaperTaskEvent,
   type PaperTaskOutcome,
 } from '../../app/utils/paper-task-contract'
-import type { PaperTaskMultipartInput } from './multipart'
+import type { PaperTaskPdfInput } from './multipart'
+import type { PreparedPaperTaskSource } from './source-acquisition'
 import { saveWorkContext, workspacePaths } from './workspace'
 import type { PaperTaskRuntimeFactory } from './runtime'
 import { cleanupStatus, finalizeHandle, requestStop, stopOutcome, type PaperTaskHandle } from './handle'
@@ -19,11 +20,12 @@ export type PreparePaperTaskSource = (bytes: Uint8Array, signal?: AbortSignal) =
 
 export function createTaskEvents(
   handle: PaperTaskHandle,
-  input: PaperTaskMultipartInput,
+  input: PaperTaskPdfInput,
   runtimeFactory: PaperTaskRuntimeFactory,
   prepareSource: PreparePaperTaskSource,
   sourceStore: ReturnType<typeof createPaperTaskSourceStore>,
   unavailableBranches: readonly PaperTaskBranch[] = [],
+  preparedSource?: PreparedPaperTaskSource,
 ): AsyncIterable<PaperTaskEvent> {
   const queue = new EventQueue<{ readonly kind: 'event'; readonly event: PaperTaskEvent }>()
   const branchQueue = new EventQueue()
@@ -36,7 +38,19 @@ export function createTaskEvents(
       return
     }
     handle.started = true
-    producer = produceTask(handle, input, runtimeFactory, prepareSource, sourceStore, queue, branchQueue, runners, () => suppressTerminal, unavailableBranches)
+    producer = produceTask(
+      handle,
+      input,
+      runtimeFactory,
+      prepareSource,
+      sourceStore,
+      queue,
+      branchQueue,
+      runners,
+      () => suppressTerminal,
+      unavailableBranches,
+      preparedSource,
+    )
   }
 
   return {
@@ -60,7 +74,19 @@ export function createTaskEvents(
           requestStop(handle, 'disconnect')
           if (producer === undefined) {
             handle.started = true
-            producer = produceTask(handle, input, runtimeFactory, prepareSource, sourceStore, queue, branchQueue, runners, () => true, unavailableBranches)
+            producer = produceTask(
+              handle,
+              input,
+              runtimeFactory,
+              prepareSource,
+              sourceStore,
+              queue,
+              branchQueue,
+              runners,
+              () => true,
+              unavailableBranches,
+              preparedSource,
+            )
           }
           await handle.settled
           return { done: true, value: undefined }
@@ -72,7 +98,7 @@ export function createTaskEvents(
 
 async function produceTask(
   handle: PaperTaskHandle,
-  input: PaperTaskMultipartInput,
+  input: PaperTaskPdfInput,
   runtimeFactory: PaperTaskRuntimeFactory,
   prepareSource: PreparePaperTaskSource,
   sourceStore: ReturnType<typeof createPaperTaskSourceStore>,
@@ -81,13 +107,14 @@ async function produceTask(
   runners: Promise<void>[],
   suppressTerminal: () => boolean,
   unavailableBranches: readonly PaperTaskBranch[],
+  preparedSource?: PreparedPaperTaskSource,
 ): Promise<void> {
   const selected = getSelectedBranches(input.selection)
   let outcome: PaperTaskOutcome = 'succeeded'
   queue.push({ kind: 'event', event: { type: 'accepted', taskId: handle.taskId, selection: input.selection } })
   queue.push({ kind: 'event', event: progressEvent(handle.taskId, 'preparing', null, 0, 1) })
   try {
-    const prepared = await prepareSource(input.pdf, handle.controller.signal)
+    const prepared = preparedSource ?? await prepareSource(input.pdf, handle.controller.signal)
     if (handle.controller.signal.aborted) {
       return
     }

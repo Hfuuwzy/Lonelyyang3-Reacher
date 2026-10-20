@@ -68,7 +68,7 @@ function deferred<T>(): { readonly promise: Promise<T>; readonly resolve: (value
 }
 
 function createHarness() {
-  const submission = deferred<PaperTaskSubmitResult>()
+  const submissions: Array<ReturnType<typeof deferred<PaperTaskSubmitResult>>> = []
   const submitRequests: PaperTaskSubmitRequest[] = []
   const cancelRequests: string[] = []
   const deleteRequests: string[] = []
@@ -81,6 +81,8 @@ function createHarness() {
     submit(request) {
       submitRequests.push(request)
       submitRequest = request
+      const submission = deferred<PaperTaskSubmitResult>()
+      submissions.push(submission)
       return submission.promise
     },
     async cancel(taskId) {
@@ -112,7 +114,9 @@ function createHarness() {
       }
       submitRequest.onEvent(event)
     },
-    resolveSubmission(result: PaperTaskSubmitResult) {
+    resolveSubmission(result: PaperTaskSubmitResult, index = 0) {
+      const submission = submissions[index]
+      if (submission === undefined) throw new Error('Submission has not started.')
       submission.resolve(result)
     },
     setCancelResponse(response: unknown) {
@@ -161,7 +165,7 @@ describe('paper-task workbench', () => {
 
     expect(harness.workbench.pdfFile.value).toBeNull()
     expect(harness.submitRequests).toHaveLength(1)
-    expect(harness.submitRequests[0]?.file).toBe(selectedFile)
+    expect(harness.submitRequests[0]?.source).toEqual({ kind: 'pdf', file: selectedFile })
     expect(harness.submitRequests[0]?.selection).toBe('translation')
 
     harness.workbench.selection.value = 'deep-reading'
@@ -177,6 +181,39 @@ describe('paper-task workbench', () => {
     await harness.workbench.handleSubmit()
 
     expect(harness.submitRequests).toHaveLength(1)
+  })
+
+  it('offers PDF fallback after a linked full text is unavailable and preserves the branch choice', async () => {
+    const harness = createHarness()
+    const selectedPdf = new File(['paper'], 'paper.pdf', { type: 'application/pdf' })
+    harness.workbench.pdfFile.value = null
+    harness.workbench.sourceUrl.value = 'https://arxiv.org/abs/2404.05961'
+    harness.workbench.selection.value = 'deep-reading'
+
+    const linkedSubmission = harness.workbench.handleSubmit()
+    expect(harness.submitRequests[0]?.source).toEqual({
+      kind: 'url',
+      url: 'https://arxiv.org/abs/2404.05961',
+    })
+    harness.resolveSubmission({ kind: 'http-error', status: 422 })
+    await linkedSubmission
+
+    expect(harness.workbench.phase.value).toBe('error')
+    expect(harness.workbench.sourceFallbackAvailable.value).toBe(true)
+    expect(harness.workbench.errorMessage.value).toContain('请上传论文 PDF 继续')
+    expect(harness.workbench.selection.value).toBe('deep-reading')
+    await harness.workbench.handleSubmit()
+    expect(harness.submitRequests).toHaveLength(1)
+
+    harness.workbench.pdfFile.value = selectedPdf
+    const pdfSubmission = harness.workbench.handleSubmit()
+
+    expect(harness.submitRequests[1]?.source).toEqual({ kind: 'pdf', file: selectedPdf })
+    expect(harness.submitRequests[1]?.selection).toBe('deep-reading')
+    expect(harness.workbench.sourceFallbackAvailable.value).toBe(false)
+
+    harness.resolveSubmission({ kind: 'http-error', status: 400 }, 1)
+    await pdfSubmission
   })
 
   it('accumulates progress per branch and lets trusted terminal states replace it', async () => {

@@ -1,14 +1,17 @@
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, ref, type Ref } from 'vue'
 import { paperTaskActionResultSchema } from '../utils/paper-task-contract'
 import { createPaperTaskWorkbenchState, type PaperTaskWorkbenchState } from './paper-task-workbench-state'
 import {
   createPaperTaskWorkbenchTransport,
   type PaperTaskSubmitRequest,
+  type PaperTaskSubmitSource,
   type PaperTaskSubmitResult,
   type PaperTaskWorkbenchTransport,
 } from './paper-task-workbench-transport'
 
 export interface PaperTaskWorkbench extends PaperTaskWorkbenchState {
+  readonly sourceUrl: Ref<string>
+  readonly sourceFallbackAvailable: Ref<boolean>
   readonly handleSubmit: () => Promise<void>
   readonly handleCancel: () => Promise<void>
   readonly handleDelete: () => Promise<void>
@@ -38,8 +41,12 @@ function assertNever(value: never): never {
   throw new Error(`unreachable paper task result: ${String(value)}`)
 }
 
+const SOURCE_FALLBACK_MESSAGE = '无法从此链接取得可用的完整论文全文。请上传论文 PDF 继续；当前翻译/深读选择会保留。'
+
 export function usePaperTaskWorkbench(options: PaperTaskWorkbenchOptions = {}): PaperTaskWorkbench {
   const state = createPaperTaskWorkbenchState()
+  const sourceUrl = ref('')
+  const sourceFallbackAvailable = ref(false)
   const transport = options.transport ?? createPaperTaskWorkbenchTransport()
   const registerLifecycle = options.registerLifecycle ?? registerVueLifecycle
 
@@ -61,12 +68,22 @@ export function usePaperTaskWorkbench(options: PaperTaskWorkbenchOptions = {}): 
 
   async function handleSubmit(): Promise<void> {
     const file = state.pdfFile.value
+    const url = sourceUrl.value.trim()
     const selection = state.selection.value
-    if (file === null || state.phase.value === 'running' || state.actionPending.value !== null) {
+    if ((file === null && (url === '' || sourceFallbackAvailable.value))
+      || state.phase.value === 'running'
+      || state.actionPending.value !== null) {
       return
     }
 
+    const source: PaperTaskSubmitSource = file !== null
+      ? { kind: 'pdf', file }
+      : { kind: 'url', url }
+    if (source.kind === 'pdf' && sourceFallbackAvailable.value) {
+      sourceUrl.value = ''
+    }
     state.pdfFile.value = null
+    sourceFallbackAvailable.value = false
     activeController?.abort()
     activeController = null
     generation += 1
@@ -80,7 +97,7 @@ export function usePaperTaskWorkbench(options: PaperTaskWorkbenchOptions = {}): 
       let response: PaperTaskSubmitResult
       try {
         const request: PaperTaskSubmitRequest = {
-          file,
+          source,
           selection,
           signal: controller.signal,
           onEvent: (event) => {
@@ -109,7 +126,12 @@ export function usePaperTaskWorkbench(options: PaperTaskWorkbenchOptions = {}): 
       switch (response.kind) {
         case 'http-error':
           if (!isErrorPhase()) {
-            state.fail(`任务端点拒绝了上传（HTTP ${response.status}）。请确认上传的是有效 PDF。`)
+            if (source.kind === 'url' && (response.status === 400 || response.status === 422)) {
+              sourceFallbackAvailable.value = true
+              state.fail(SOURCE_FALLBACK_MESSAGE)
+            } else {
+              state.fail(`任务端点拒绝了请求（HTTP ${response.status}）。请检查论文来源后重新提交。`)
+            }
           }
           return
         case 'stream':
@@ -198,6 +220,8 @@ export function usePaperTaskWorkbench(options: PaperTaskWorkbenchOptions = {}): 
       }
       if (result.data.ok) {
         state.pdfFile.value = null
+        sourceUrl.value = ''
+        sourceFallbackAvailable.value = false
         state.resetRun()
         state.phase.value = 'idle'
         return
@@ -228,6 +252,8 @@ export function usePaperTaskWorkbench(options: PaperTaskWorkbenchOptions = {}): 
     generation += 1
     state.actionPending.value = null
     state.pdfFile.value = null
+    sourceUrl.value = ''
+    sourceFallbackAvailable.value = false
     state.resetRun()
     state.phase.value = 'idle'
   }
@@ -242,6 +268,8 @@ export function usePaperTaskWorkbench(options: PaperTaskWorkbenchOptions = {}): 
 
   return {
     pdfFile: state.pdfFile,
+    sourceUrl,
+    sourceFallbackAvailable,
     selection: state.selection,
     phase: state.phase,
     taskId: state.taskId,

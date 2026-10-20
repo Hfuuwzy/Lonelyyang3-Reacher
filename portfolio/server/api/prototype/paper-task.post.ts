@@ -12,7 +12,11 @@ import { consumeAttestedDevPeer } from '../../utils/paper-review/dev-peer'
 import { checkContentLength, checkPaperReviewAccess } from '../../utils/paper-review/gate'
 import { observeRequestDisconnect } from '../../utils/paper-review/disconnect'
 import { PAPER_PDF_BYTE_CAP } from '../../utils/paper-review/multipart'
-import { parsePaperTaskMultipart } from '../../paper-task/multipart'
+import { parsePaperTaskMultipart, type PaperTaskPdfInput } from '../../paper-task/multipart'
+import {
+  resolvePaperTaskSourceLink,
+  type PreparedPaperTaskSource,
+} from '../../paper-task/source-acquisition'
 import { paperTaskService } from '../../paper-task/instance'
 
 /**
@@ -20,9 +24,11 @@ import { paperTaskService } from '../../paper-task/instance'
  *
  * Fails closed before reading the body when the request is not a local dev
  * loopback request from the matching Origin, or when the Content-Length cannot
- * be safely validated. Otherwise it parses the multipart form (exactly `pdf`
- * and `selection`, no credentials), streams the frozen wire events, and ends in
- * one terminal event.
+ * be safely validated. Otherwise it parses one `pdf` or `sourceUrl` plus the
+ * `selection` field (no credentials), resolves a controlled paper link to one
+ * reliable full-text PDF when supplied, streams the same task events, and ends
+ * in one terminal event. Unsupported or incomplete linked sources fail before
+ * task creation and direct users to the PDF upload fallback.
  */
 export default defineEventHandler(async (event) => {
   const peer = import.meta.dev ? consumeAttestedDevPeer(event) : undefined
@@ -52,12 +58,31 @@ export default defineEventHandler(async (event) => {
       throw createError({ statusCode: 400, message: parsed.error.message })
     }
 
+    let taskInput: PaperTaskPdfInput
+    let preparedSource: PreparedPaperTaskSource | undefined
+    if (parsed.input.sourceUrl !== null) {
+      const resolved = await resolvePaperTaskSourceLink(parsed.input.sourceUrl, { signal: disconnect.signal })
+      if (resolved.kind === 'cancelled') return
+      if (resolved.kind === 'unavailable') {
+        throw createError({ statusCode: 422, message: '无法从此链接取得可用的完整论文全文，请上传论文 PDF 继续。' })
+      }
+      taskInput = { pdf: resolved.pdf, selection: parsed.input.selection }
+      preparedSource = resolved.preparedSource
+    } else if (parsed.input.pdf !== null) {
+      taskInput = { pdf: parsed.input.pdf, selection: parsed.input.selection }
+    } else {
+      throw createError({ statusCode: 400, message: '请提供一篇论文的链接或上传论文 PDF。' })
+    }
+
     setResponseHeaders(event, {
       'content-type': 'text/event-stream; charset=utf-8',
       'cache-control': 'no-store, no-cache',
     })
 
-    const submission = await paperTaskService().submit(parsed.input, { signal: disconnect.signal })
+    const submissionOptions = preparedSource === undefined
+      ? { signal: disconnect.signal }
+      : { signal: disconnect.signal, preparedSource }
+    const submission = await paperTaskService().submit(taskInput, submissionOptions)
     if (!submission.ok) {
       throw createError({ statusCode: submission.statusCode, message: submission.message })
     }

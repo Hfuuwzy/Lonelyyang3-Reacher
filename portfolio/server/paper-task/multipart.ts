@@ -1,12 +1,10 @@
 /**
  * Semantic multipart parser for the sample paper-task endpoint (issue #40).
  *
- * Recognises exactly two fields — a `pdf` file and a `selection` text field —
- * and rejects duplicate / unknown / missing fields, extra files, an empty PDF,
- * a MIME other than `application/pdf`, a missing `%PDF-` signature, oversized
- * files, and any selection outside the frozen wire vocabulary. No credentials
- * are accepted here. Input is parsed into a typed `PaperTaskMultipartInput`;
- * every failure is a safe, value-free message.
+ * Recognises one paper source (`pdf` or `sourceUrl`) and a `selection` text
+ * field. It rejects duplicate / unknown / missing fields, mixed source types,
+ * extra files, invalid PDFs, oversized files, and unsupported selections. No
+ * credentials are accepted here. Every failure is a safe, value-free message.
  */
 
 import { PAPER_PDF_BYTE_CAP } from '../utils/paper-review/multipart'
@@ -29,12 +27,23 @@ export interface PaperTaskMultipartInput {
   readonly selection: PaperTaskSelection
 }
 
+export interface PaperTaskParsedInput {
+  readonly pdf: Uint8Array | null
+  readonly sourceUrl: string | null
+  readonly selection: PaperTaskSelection
+}
+
+export type PaperTaskPdfInput = PaperTaskMultipartInput
+
 export type PaperTaskMultipartErrorCode =
   | 'duplicate-field'
   | 'unknown-field'
   | 'extra-file'
-  | 'missing-pdf'
+  | 'missing-source'
   | 'duplicate-pdf'
+  | 'duplicate-source-url'
+  | 'multiple-sources'
+  | 'invalid-source-url'
   | 'empty-pdf'
   | 'invalid-mime'
   | 'invalid-signature'
@@ -48,7 +57,7 @@ export interface PaperTaskMultipartError {
 }
 
 export type PaperTaskMultipartResult =
-  | { readonly success: true; readonly input: PaperTaskMultipartInput }
+  | { readonly success: true; readonly input: PaperTaskParsedInput }
   | { readonly success: false; readonly error: PaperTaskMultipartError }
 
 function failure(code: PaperTaskMultipartErrorCode, message: string): PaperTaskMultipartResult {
@@ -72,10 +81,10 @@ function isPaperTaskSelection(value: string): value is PaperTaskSelection {
 }
 
 /**
- * Parse and validate the raw multipart parts into a typed input. Any violation
- * of the two-field contract is an immediate typed failure; the PDF file and the
- * selection text are then validated for size, signature, MIME, and supported
- * values.
+ * Parse and validate one source plus the selected task branches. Any violation
+ * of the input contract is an immediate typed failure; uploaded PDFs are
+ * validated for size, signature, and MIME, while links are bounded here and
+ * constrained to the controlled source allowlist during acquisition.
  */
 export function parsePaperTaskMultipart(
   parts: readonly PaperTaskMultipartPart[],
@@ -83,6 +92,7 @@ export function parsePaperTaskMultipart(
 ): PaperTaskMultipartResult {
   let pdf: Uint8Array | undefined
   let sawPdf = false
+  let sourceUrl: string | undefined
   let selection: string | undefined
 
   for (const part of parts) {
@@ -118,17 +128,33 @@ export function parsePaperTaskMultipart(
       continue
     }
 
-    if (name !== 'selection') {
-      return failure('unknown-field', '上传请求包含不支持的字段，请检查后重新提交。')
+    if (name === 'sourceUrl') {
+      if (sourceUrl !== undefined) {
+        return failure('duplicate-source-url', '请求包含重复的论文链接，请检查后重新提交。')
+      }
+      sourceUrl = new TextDecoder().decode(part.data).trim()
+      continue
     }
-    if (selection !== undefined) {
-      return failure('duplicate-field', '上传请求包含重复字段，请检查后重新提交。')
+
+    if (name === 'selection') {
+      if (selection !== undefined) {
+        return failure('duplicate-field', '上传请求包含重复字段，请检查后重新提交。')
+      }
+      selection = new TextDecoder().decode(part.data).trim()
+      continue
     }
-    selection = new TextDecoder().decode(part.data).trim()
+
+    return failure('unknown-field', '上传请求包含不支持的字段，请检查后重新提交。')
   }
 
-  if (pdf === undefined) {
-    return failure('missing-pdf', '未提供 PDF 文件，请上传 PDF 后重新提交。')
+  if (pdf !== undefined && sourceUrl !== undefined) {
+    return failure('multiple-sources', '一次只处理一篇论文，请在论文链接和 PDF 上传中选择一种来源。')
+  }
+  if (pdf === undefined && sourceUrl === undefined) {
+    return failure('missing-source', '请提供一篇论文的链接或上传论文 PDF。')
+  }
+  if (sourceUrl !== undefined && (sourceUrl.length === 0 || sourceUrl.length > 2048 || /[\u0000-\u001f\u007f]/u.test(sourceUrl))) {
+    return failure('invalid-source-url', '论文链接格式无效，请检查后重新提交。')
   }
   if (selection === undefined || selection === '') {
     return failure('missing-selection', '缺少任务分支选择，请选择翻译、深读或两者后重新提交。')
@@ -139,6 +165,6 @@ export function parsePaperTaskMultipart(
 
   return {
     success: true,
-    input: { pdf, selection },
+    input: { pdf: pdf ?? null, sourceUrl: sourceUrl ?? null, selection },
   }
 }

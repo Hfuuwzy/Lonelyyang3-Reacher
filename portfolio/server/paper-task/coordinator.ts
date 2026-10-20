@@ -16,7 +16,8 @@ import {
   type PaperTaskActionResult,
   type PaperTaskEvent,
 } from '../../app/utils/paper-task-contract'
-import type { PaperTaskMultipartInput } from './multipart'
+import type { PaperTaskPdfInput } from './multipart'
+import type { PreparedPaperTaskSource } from './source-acquisition'
 import type { PaperTaskSourceResult } from '../../app/utils/paper-task-source-contract'
 import {
   createPaperTaskWorkspace,
@@ -58,7 +59,10 @@ export type PaperTaskSubmitResult =
   | { readonly ok: false; readonly statusCode: number; readonly message: string }
 
 export interface PaperTaskService {
-  submit(input: PaperTaskMultipartInput, options?: { readonly signal?: AbortSignal }): Promise<PaperTaskSubmitResult>
+  submit(
+    input: PaperTaskPdfInput,
+    options?: { readonly signal?: AbortSignal; readonly preparedSource?: PreparedPaperTaskSource },
+  ): Promise<PaperTaskSubmitResult>
   cancel(taskId: string): Promise<PaperTaskActionResult>
   remove(taskId: string): Promise<PaperTaskActionResult>
   source(taskId: string): StoredSource | undefined
@@ -86,8 +90,8 @@ export function createPaperTaskService(
   }
 
   async function submit(
-    input: PaperTaskMultipartInput,
-    options: { readonly signal?: AbortSignal } = {},
+    input: PaperTaskPdfInput,
+    options: { readonly signal?: AbortSignal; readonly preparedSource?: PreparedPaperTaskSource } = {},
   ): Promise<PaperTaskSubmitResult> {
     const selection = paperTaskSelectionSchema.safeParse(input.selection)
     if (!selection.success) {
@@ -133,7 +137,15 @@ export function createPaperTaskService(
     return {
       ok: true,
       taskId,
-      events: createTaskEvents(handle, input, taskRuntimeFactory, prepareSource, sourceStore, unavailableBranches),
+      events: createTaskEvents(
+        handle,
+        input,
+        taskRuntimeFactory,
+        prepareSource,
+        sourceStore,
+        unavailableBranches,
+        options.preparedSource,
+      ),
     }
   }
 
