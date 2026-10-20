@@ -171,6 +171,28 @@
   cursor: not-allowed;
 }
 
+.paper-task-api-settings__button--return {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-color: var(--vermilion);
+  background: var(--vermilion);
+  color: var(--paper-warm);
+  font-weight: 600;
+  text-decoration: none;
+  transition: transform 120ms ease, background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.paper-task-api-settings__button--return:hover {
+  border-color: color-mix(in srgb, var(--vermilion) 84%, var(--ink));
+  background: color-mix(in srgb, var(--vermilion) 88%, var(--ink));
+  color: var(--paper-warm);
+}
+
+.paper-task-api-settings__button--return:active {
+  transform: scale(0.96);
+}
+
 .paper-task-api-settings__message[role='alert'] {
   color: var(--ink);
 }

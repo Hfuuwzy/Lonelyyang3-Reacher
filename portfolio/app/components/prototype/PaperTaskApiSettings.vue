@@ -141,6 +141,12 @@
         >
           {{ phase === 'clearing' ? '正在清除…' : '清除设置' }}
         </button>
+        <NuxtLink
+          class="paper-task-api-settings__button paper-task-api-settings__button--return"
+          :to="localePath('/prototype/paper-task')"
+        >
+          返回论文任务
+        </NuxtLink>
       </div>
 
       <p v-if="noticeText !== null && !(phase === 'error' && status === null)" class="paper-task-api-settings__message" :role="phase === 'error' ? 'alert' : 'status'">
@@ -166,6 +172,8 @@
 import { computed } from 'vue'
 import { usePaperTaskApiSettings } from '~/composables/paper-task-api-settings'
 import { PAPER_TASK_PROVIDER_PROTOCOLS, type PaperTaskProviderSettings } from '~/utils/paper-task-provider-contract'
+
+const localePath = useLocalePath()
 
 const PROTOCOL_LABELS = {
   'openai-completions': 'OpenAI Chat Completions',
