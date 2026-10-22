@@ -105,6 +105,21 @@ describe('paper-task provider image wire inspection', () => {
     expect(unexpectedResult).toMatchObject({ kind: 'blocked', reason: 'unexpected-image' })
   })
 
+  it('allows later compacted history to omit already-approved images', async () => {
+    // Given an approved image and histories that retain none or one of its blocks.
+    const image = await preparedImage()
+    const textOnly = Buffer.from(JSON.stringify({ messages: [{ role: 'user', content: `Analyze this. ${context}` }] }))
+    const subset = Buffer.from(JSON.stringify(requestFor('openai-completions', image.data)))
+
+    // When the guard tolerates partial history after compaction.
+    const empty = await inspectPaperTaskImageRequest('openai-completions', textOnly, { expectedImages: [image], allowPartialImages: true })
+    const one = await inspectPaperTaskImageRequest('openai-completions', subset, { expectedImages: [image], allowPartialImages: true })
+
+    // Then absent images are allowed while a present image must still match.
+    expect(empty).toMatchObject({ kind: 'valid', imageCount: 0 })
+    expect(one).toMatchObject({ kind: 'valid', imageCount: 1 })
+  })
+
   it('rejects changed decoded pixels even when dimensions and context are unchanged', async () => {
     // Given two images with the same dimensions but different pixel colors.
     const originalCanvas = createCanvas(2, 3)

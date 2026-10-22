@@ -9,6 +9,7 @@ import type {
 import type { PaperTaskImageReceipt } from '../../app/utils/paper-task-image-contract'
 import { readPaperTaskImageReceipts } from './image-receipts'
 import { workspacePaths } from './workspace'
+import { writeSourceDocument } from './source-document.mjs'
 
 export type StoredSourceRecord = {
   readonly record: PaperTaskSourceRecord
@@ -102,6 +103,7 @@ export function createPaperTaskSourceStore() {
       revision: 1,
       assets: [...assetEntries.values()].map(({ publicAsset }) => retainedAsset(publicAsset)),
     }))
+    writeSourceDocument({ root, source, records: [...records.values()], assets: [...assetEntries.values()].map(({ publicAsset }) => publicAsset), revision: 1 })
     tasks.set(taskId, { root, recordsDir: paths.sourceRecordsDir, source, revision: 1, records, assets: assetEntries, available: true })
   }
 
@@ -142,7 +144,7 @@ export function createPaperTaskSourceStore() {
     const state = stateFor(taskId, root)
     if (state === undefined || !state.available) return []
     const paths = workspacePaths(root)
-    return [state.recordsDir, paths.originalPath, paths.assetsDir, paths.sourceStatePath]
+    return [state.recordsDir, paths.originalPath, paths.assetsDir, paths.sourceStatePath, paths.sourceMarkdownPath, paths.sourceMetadataPath]
   }
 
   function replace(
@@ -172,6 +174,9 @@ export function createPaperTaskSourceStore() {
         revision: nextRevision,
         assets: [...state.assets.values()].map(({ publicAsset }) => retainedAsset(publicAsset)),
       }))
+      const nextRecords = new Map(state.records)
+      for (const item of changedRecords) nextRecords.set(item.record.id, item)
+      writeSourceDocument({ root, source: nextSource, records: [...nextRecords.values()], assets: [...state.assets.values()].map(({ publicAsset }) => publicAsset), revision: nextRevision })
       state.source = nextSource
       state.revision = nextRevision
       for (const item of changedRecords) state.records.set(item.record.id, item)

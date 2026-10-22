@@ -19,11 +19,24 @@ function view(taskId: string, status: 'preview' | 'needs-confirmation' = 'previe
       notice: status === 'needs-confirmation' ? '仍有可能需要人工确认的疑点；已有可读内容保留。' : null,
       markdown: '# 主稿\n\n正文。',
       assets: [],
+      formats: emptyFormats(),
     }],
     pdfs: {
       original: { available: true, message: '原论文 PDF 可查看。' },
       translated: { available: false, message: '译文 PDF 尚未生成或尚未通过全页检查。' },
     },
+  }
+}
+
+function emptyFormats() {
+  const state = (fileName: string) => ({
+    status: 'unbuilt' as const, build: 'unbuilt' as const, fileName, available: false,
+    inspectionAvailable: false, finalAvailable: false, pages: [], blockers: [], boundaryVerified: false,
+    message: '尚未构建。',
+  })
+  return {
+    markdown: state('translation.md'), assets: state('translation-assets.zip'),
+    pdf: state('translated.pdf'),
   }
 }
 

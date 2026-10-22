@@ -1,14 +1,18 @@
-import type { PaperTaskBranches, PaperTaskState } from '../../app/utils/paper-task-contract'
+import type { PaperTaskBranches, PaperTaskBranch, PaperTaskState } from '../../app/utils/paper-task-contract'
 import {
   paperTaskReaderViewSchema,
   type PaperTaskReaderDocument,
   type PaperTaskReaderDocumentStatus,
+  type PaperTaskReaderFormats,
   type PaperTaskReaderView,
 } from '../../app/utils/paper-task-reader-contract'
 import { readPaperTaskReading } from './reading-access'
 import { readPaperTaskOriginalPdf, readPaperTaskTranslatedPdf } from './pdf-access'
 import type { StoredSource } from './source-store'
 import { readPaperTaskTranslation } from './translation-access'
+import { readPaperTaskFormatStatus } from './artifact-export'
+import type { PaperTaskExportFormat, PaperTaskExportStatus } from './artifact-export'
+import { paperTaskBranchQuality, paperTaskDocumentQuality, type PaperTaskBranchQualityState } from './format-gate'
 
 const READABLE_STATES = new Set<PaperTaskState>(['preview-ready', 'needs-confirmation', 'complete', 'sample-ready'])
 
@@ -31,12 +35,16 @@ export function readPaperTaskReader(
   if (READABLE_STATES.has(branches.translation)) {
     const view = readPaperTaskTranslation(taskId, root)
     if (view !== undefined) {
+      const status = translationDocumentStatus(branches.translation, view.status)
       documents.push({
         branch: 'translation',
-        status: translationDocumentStatus(branches.translation, view.status),
+        status,
         notice: translationNotice(view.status, branches.translation),
         markdown: view.markdown,
         assets: view.assets,
+        formats: formatStates(root, 'translation', view.markdown, paperTaskDocumentQuality(
+          paperTaskBranchQuality(branches.translation), status,
+        )),
       })
     }
   }
@@ -44,18 +52,23 @@ export function readPaperTaskReader(
   if (READABLE_STATES.has(branches['deep-reading'])) {
     const view = readPaperTaskReading(taskId, root, stored)
     if (view !== undefined) {
+      const status = readingDocumentStatus(branches['deep-reading'], view.status)
       documents.push({
         branch: 'deep-reading',
-        status: readingDocumentStatus(branches['deep-reading'], view.status),
+        status,
         notice: readingNotice(view.status, branches['deep-reading']),
         markdown: view.markdown,
         assets: view.assets,
+        formats: formatStates(root, 'deep-reading', view.markdown, paperTaskDocumentQuality(
+          paperTaskBranchQuality(branches['deep-reading']), status,
+        )),
       })
     }
   }
 
   const originalAvailable = readPaperTaskOriginalPdf(root) !== undefined
-  const translatedAvailable = branches.translation === 'complete'
+  const translatedAvailable = documents.find((document) => document.branch === 'translation')?.formats.pdf.finalAvailable === true
+    && branches.translation === 'complete'
     && readPaperTaskTranslatedPdf(root, 'complete') !== undefined
   const view = {
     taskId,
@@ -76,6 +89,29 @@ export function readPaperTaskReader(
   }
   const parsed = paperTaskReaderViewSchema.safeParse(view)
   return parsed.success ? parsed.data : undefined
+}
+
+function formatStates(
+  root: string,
+  branch: PaperTaskBranch,
+  markdown: string,
+  masterQuality: PaperTaskBranchQualityState,
+) {
+  const formats = ['markdown', 'assets', 'pdf'] as const
+  return Object.fromEntries(formats.map((format) => {
+    const { branch: _branch, format: _format, ...state } = readPaperTaskFormatStatus(root, branch, format, markdown, masterQuality)
+    return [format, { ...state, message: formatMessage(format, state.status) }]
+  })) as PaperTaskReaderFormats
+}
+
+function formatMessage(format: PaperTaskExportFormat, status: PaperTaskExportStatus): string {
+  const label = format === 'markdown' ? 'Markdown'
+    : format === 'assets' ? '受控资产包' : 'PDF'
+  if (status === 'complete') return `${label} 已与当前主稿一致；${format === 'markdown' || format === 'assets' ? '可取得。' : '已完成逐页检查，可作为最终成品取得。'}`
+  if (status === 'preview') return `${label} 仍是预览状态；主稿尚未达到最终质量门槛。`
+  if (status === 'needs-confirmation') return `${label} 尚未通过所需检查；可读 Markdown 和其他格式状态保持独立。`
+  if (status === 'failed') return `${label} 构建或边界校验失败；不会隐藏其他格式或阅读正文。`
+  return `${label} 尚未构建。`
 }
 
 function documentStatus(state: PaperTaskState): PaperTaskReaderDocumentStatus {

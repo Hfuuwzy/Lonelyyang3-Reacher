@@ -68,7 +68,7 @@ function stepState(stage: PaperReviewStage): 'done' | 'current' | 'pending' {
 
 .paper-review-progress__steps {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 12px;
   margin: 0;
   padding: 0;
@@ -88,7 +88,7 @@ function stepState(stage: PaperReviewStage): 'done' | 'current' | 'pending' {
 }
 
 .paper-review-progress__step--current {
-  border-color: var(--vermilion);
+  background: var(--sakura);
   color: var(--ink);
 }
 
@@ -109,8 +109,8 @@ function stepState(stage: PaperReviewStage): 'done' | 'current' | 'pending' {
 }
 
 .paper-review-progress__step--done .paper-review-progress__ordinal {
-  border-color: var(--vermilion);
-  color: var(--vermilion);
+  border-color: currentColor;
+  color: inherit;
 }
 
 @media (width < 768px) {

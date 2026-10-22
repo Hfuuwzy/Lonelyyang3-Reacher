@@ -23,12 +23,19 @@
     <section v-if="report.gaps.length > 0" class="paper-review-gaps" aria-labelledby="paper-review-gaps-title">
       <h4 id="paper-review-gaps-title" class="paper-review-gaps__title">未覆盖项</h4>
       <ul class="paper-review-gaps__list">
-        <li v-for="gap in report.gaps" :key="`${gap.section}-${gap.reason}`" class="paper-review-gaps__item">
-          <strong>{{ gap.section }}</strong>
-          <span>：{{ gap.reason }}</span>
+        <li v-for="item in gapItems" :key="item.reason" class="paper-review-gaps__item">
+          <strong>{{ item.scopes.join('、') }}</strong>
+          <span>：{{ item.reason }}</span>
         </li>
       </ul>
     </section>
+
+    <p
+      v-if="report.sections.length > 0"
+      class="paper-review-report__verification-note"
+    >
+      核验说明：本报告仅核验引文与 PDF 原文在标注阅读页上的逐字一致性；出处匹配不代表论断在原文中获得语义支持，亦不代表结论成立或全文内容已覆盖。
+    </p>
 
     <div v-for="section in report.sections" :key="`${section.kind}-${section.title}`" class="paper-review-section">
       <header class="paper-review-section__heading">
@@ -40,7 +47,7 @@
         <li v-for="(finding, index) in section.findings" :key="index" class="paper-review-finding">
           <p class="paper-review-finding__statement">{{ finding.statement }}</p>
           <p class="paper-review-finding__source">
-            出处：{{ finding.source.heading }} · 阅读页 {{ finding.source.readerPage }}
+            出处：{{ paperReviewHeadingLabel(finding.source.heading) }} · 阅读页 {{ finding.source.readerPage }}
             <template v-if="finding.source.printedPage"> · 印刷页 {{ finding.source.printedPage }}</template>
           </p>
           <blockquote class="paper-review-finding__quote">{{ finding.source.quote }}</blockquote>
@@ -52,13 +59,15 @@
 
 <script setup lang="ts">
 import type { PaperReviewReport } from '~/utils/paper-review-contract'
-import { paperReviewSectionKindLabel } from './paper-review-labels'
+import { paperReviewGapItems, paperReviewHeadingLabel, paperReviewSectionKindLabel } from './paper-review-labels'
 
 interface Props {
   readonly report: PaperReviewReport
 }
 
-defineProps<Props>()
+const props = defineProps<Props>()
+
+const gapItems = computed(() => paperReviewGapItems(props.report.gaps))
 </script>
 
 <style scoped>
@@ -123,6 +132,16 @@ defineProps<Props>()
   color: var(--ink);
   font-size: 15px;
   line-height: 1.8;
+}
+
+.paper-review-report__verification-note {
+  margin: 0;
+  padding: 12px 16px;
+  border-block-start: 1px dotted var(--rule);
+  border-block-end: 1px dotted var(--rule);
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.7;
 }
 
 .paper-review-gaps {

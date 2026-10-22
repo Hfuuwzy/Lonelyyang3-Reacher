@@ -183,6 +183,21 @@ describe('paper-task workbench', () => {
     expect(harness.submitRequests).toHaveLength(1)
   })
 
+  it('explains that provider settings are required when the server rejects an unconfigured task', async () => {
+    const harness = createHarness()
+    const submission = harness.workbench.handleSubmit()
+
+    harness.resolveSubmission({ kind: 'http-error', status: 409 })
+    await submission
+
+    expect(harness.workbench.providerSettingsRequired.value).toBe(true)
+    expect(harness.workbench.errorMessage.value).toContain('API 密钥')
+    expect(harness.workbench.errorMessage.value).toContain('论文任务 API 设置')
+
+    harness.workbench.handleResetError()
+    expect(harness.workbench.providerSettingsRequired.value).toBe(false)
+  })
+
   it('offers PDF fallback after a linked full text is unavailable and preserves the branch choice', async () => {
     const harness = createHarness()
     const selectedPdf = new File(['paper'], 'paper.pdf', { type: 'application/pdf' })
@@ -214,6 +229,8 @@ describe('paper-task workbench', () => {
 
     harness.resolveSubmission({ kind: 'http-error', status: 400 }, 1)
     await pdfSubmission
+    expect(harness.workbench.providerSettingsRequired.value).toBe(false)
+    expect(harness.workbench.errorMessage.value).toContain('HTTP 400')
   })
 
   it('accumulates progress per branch and lets trusted terminal states replace it', async () => {

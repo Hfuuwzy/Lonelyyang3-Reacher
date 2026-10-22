@@ -42,6 +42,14 @@ export interface PaperExtractionError {
 export interface ExtractedPaperLine {
   readonly text: string
   readonly isHeading: boolean
+  /** Rounded baseline y (larger = higher on the page); app reads this for paragraph spacing. */
+  readonly baselineY?: number
+  /** Column index in x order for a multi-column page, or undefined for full-width. */
+  readonly column?: number
+  /** True when runs on this baseline overlap, so the reading order is genuinely ambiguous. */
+  readonly ambiguous?: boolean
+  /** Recognized content kind carried to the candidate layer for preservation. */
+  readonly recognized?: 'table' | 'formula' | 'code'
 }
 
 export interface ExtractedPaperPage {
@@ -54,6 +62,10 @@ export interface ExtractedPaperPage {
   readonly headings: readonly string[]
   /** The full page text, lines joined with newlines. */
   readonly text: string
+  /** Media-box width in PDF units, retained for region geometry. */
+  readonly pageWidth?: number
+  /** Media-box height in PDF units, retained for region geometry. */
+  readonly pageHeight?: number
 }
 
 export interface PaperExtractionSuccess {

@@ -2,6 +2,10 @@
 
 Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
 
+## Repository identity
+
+The canonical repository is `Hfuuwzy/Lonelyyang3-Reacher` (GitHub repository ID `1297418773`). GitHub resolves the former name `Hfuuwzy/MyWorks` to the same repository ID; these are not separate repositories. Use the canonical name for new references and explicit `--repo` arguments.
+
 ## Conventions
 
 - **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies.
@@ -11,7 +15,7 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 - **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
 - **Close**: `gh issue close <number> --comment "..."`
 
-Infer the repo from `git remote -v`; `gh` does this automatically when run inside a clone. When not inside a clone, pass `--repo Hfuuwzy/MyWorks` explicitly.
+Infer the repo from `git remote -v`; `gh` does this automatically when run inside a clone. When not inside a clone, pass `--repo Hfuuwzy/Lonelyyang3-Reacher` explicitly.
 
 ## Pull requests as a triage surface
 

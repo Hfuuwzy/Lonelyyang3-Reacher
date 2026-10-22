@@ -4,15 +4,24 @@
  * Browser-safe: no DOM, fetch, or Node APIs — only literals, types, and pure
  * type-guard functions. The backend agent imports this exact file to shape its
  * `text/event-stream` payloads, and the frontend imports it to validate every
- * inbound stream event at runtime. Do not drift this file from the issue #27
- * contract: `POST /api/prototype/paper-review`, multipart fields `pdf`,
- * `providerLabel`, `baseUrl`, `protocol`, `model`, `apiKey`.
+ * inbound stream event at runtime. Do not drift this file from the contract:
+ * `POST /api/prototype/paper-review`, multipart fields `pdf`,
+ * `providerLabel`, `baseUrl`, `protocol`, `model`, `apiKey`. Under issue #29 the
+ * stream ends in exactly one terminal `result` event carrying the
+ * application-derived task result, never the legacy single `report`.
  */
 
 import { createPaperReviewTaskResultSchema } from './paper-review-task-schema'
 import type { PaperReviewTaskResult } from './paper-review-task-contract'
 
-export const PAPER_REVIEW_STAGES = ['validating', 'extracting', 'analyzing', 'verifying'] as const
+export const PAPER_REVIEW_STAGES = [
+  'validating',
+  'extracting',
+  'inventorying',
+  'analyzing',
+  'translating',
+  'verifying',
+] as const
 export type PaperReviewStage = (typeof PAPER_REVIEW_STAGES)[number]
 
 export const PAPER_REVIEW_SECTION_KINDS = ['claims', 'methods', 'experiments', 'evidence', 'criticism'] as const
@@ -58,9 +67,9 @@ export interface PaperReviewStageEvent {
   readonly stage: PaperReviewStage
 }
 
-export interface PaperReviewReportEvent {
-  readonly type: 'report'
-  readonly report: PaperReviewReport
+export interface PaperReviewResultEvent {
+  readonly type: 'result'
+  readonly result: PaperReviewTaskResult
 }
 
 export interface PaperReviewErrorEvent {
@@ -70,7 +79,7 @@ export interface PaperReviewErrorEvent {
   readonly message: string
 }
 
-export type PaperReviewStreamEvent = PaperReviewStageEvent | PaperReviewReportEvent | PaperReviewErrorEvent
+export type PaperReviewStreamEvent = PaperReviewStageEvent | PaperReviewResultEvent | PaperReviewErrorEvent
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -172,8 +181,8 @@ export function isPaperReviewStreamEvent(value: unknown): value is PaperReviewSt
   switch (value.type) {
     case 'stage':
       return isPaperReviewStage(value.stage)
-    case 'report':
-      return isPaperReviewReport(value.report)
+    case 'result':
+      return isPaperReviewTaskResult(value.result)
     case 'error':
       return isPaperReviewStage(value.stage) && isString(value.code) && isString(value.message)
     default:

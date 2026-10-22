@@ -2,10 +2,12 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
-import { DeepSeekHarness, type DeepSeekHarnessOptions } from '@deepseek-ai/dsh-sdk-client'
-import type { ExtractedPaperPage } from './pdf'
-import { buildPaperReviewPrompt } from './prompt'
+import { DeepSeekHarness, type DeepSeekHarnessOptions, type RunResult } from '@deepseek-ai/dsh-sdk-client'
 import { defaultResolveLocalDshBin, type DshBinResolver } from './dsh-bin-resolver'
+import { buildChildEnv, buildOverlayPatch, PAPER_REVIEW_ROUTE } from '../../paper-review-internal/harness-launch'
+import { RUN_FAILED_MESSAGE, cancelledResult, toHarnessError, toRunOutcome } from '../../paper-review-internal/harness-outcomes'
+
+export { buildChildEnv, buildOverlayPatch, RUN_FAILED_MESSAGE }
 
 /**
  * App-owned Harness runner for one paper review (issue #27).
@@ -32,11 +34,6 @@ export const PaperReviewRunInputSchema = z.object({
 })
 export type PaperReviewRunInput = z.infer<typeof PaperReviewRunInputSchema>
 
-/** Fixed provider route this runner selects on the inserted pi-ai adapter. */
-const PAPER_REVIEW_ROUTE = 'paper-review'
-/** Environment variable that carries the caller's key to the child process. */
-const PAPER_REVIEW_KEY_ENV = 'PAPER_REVIEW_API_KEY'
-
 export type PaperReviewHarnessErrorCode =
   | 'invalid-input'
   | 'cli-not-found'
@@ -44,6 +41,7 @@ export type PaperReviewHarnessErrorCode =
   | 'cli-not-built'
   | 'run-failed'
   | 'cleanup-failed'
+  | 'cancelled'
 
 /** Fixed, safe, actionable text for a cleanup failure; never carries SDK detail. */
 export const CLEANUP_FAILED_MESSAGE =
@@ -70,7 +68,7 @@ export type PaperReviewHarnessResult = PaperReviewHarnessSuccess | PaperReviewHa
 
 /** Minimal run surface a harness must satisfy; the real `DeepSeekHarness` fits. */
 export interface HarnessLike {
-  run(input: string, options?: { readonly sessionId?: string }): Promise<{ readonly sessionId: string; readonly finalResponse: string }>
+  run(input: string, options?: { readonly sessionId?: string }): Promise<Pick<RunResult, 'sessionId' | 'finalResponse' | 'events'>>
   close(): Promise<void>
 }
 
@@ -86,78 +84,40 @@ export interface PaperReviewRunnerDependencies {
   readonly resolveLocalDshBin?: DshBinResolver
   /** Create a fresh isolated temp home for the child (default: mkdtemp under tmpdir). */
   readonly createTempRoot?: () => string
+  /** Remove a temp home created by createTempRoot (default: recursive rmSync). */
+  readonly removeTempRoot?: (root: string) => void
+}
+
+/** Per-invocation lifecycle knobs (e.g. a disconnect/cancel signal). */
+export interface PaperReviewRunOptions {
+  readonly signal?: AbortSignal
+}
+
+export interface PaperReviewModelRequest {
+  readonly purpose: 'inventory' | 'report' | 'translation' | 'source-review'
+  readonly prompt: string
 }
 
 const defaultHarnessFactory: HarnessFactory = (options) => new DeepSeekHarness(options)
 const defaultCreateTempRoot: () => string = () => mkdtempSync(join(tmpdir(), 'paper-review-'))
-
-/** Render one interpolated YAML scalar safely (JSON is a YAML subset). */
-function yamlScalar(value: string): string {
-  return JSON.stringify(value)
-}
-
-/** The per-run overlay patch disabling the profile's tools and retry. */
-export function buildOverlayPatch(input: PaperReviewRunInput): string {
-  return [
-    '# Per-run overlay on profile sdk-minimal (paper-review, issue #27).',
-    '- id: persistent-bash',
-    '  disabled: true',
-    '- id: persistent-pwsh',
-    '  disabled: true',
-    '- id: mcp-resources',
-    '  disabled: true',
-    '- id: llm-retry',
-    '  disabled: true',
-    '- insert:',
-    `    - id: llm-pi-ai`,
-    `      name: ${yamlScalar('@deepseek-ai/dsh-llm-pi-ai')}`,
-    '      config:',
-    '        providers:',
-    `          ${PAPER_REVIEW_ROUTE}:`,
-    `            api: ${input.protocol}`,
-    `            apiKeyEnv: ${PAPER_REVIEW_KEY_ENV}`,
-    `            baseURL: ${yamlScalar(input.baseUrl)}`,
-    '            models:',
-    `              - id: ${yamlScalar(input.model)}`,
-    '',
-  ].join('\n')
-}
-
-/** Strict child-environment allowlist; never spreads the parent environment. */
-export function buildChildEnv(apiKey: string): NodeJS.ProcessEnv {
-  const parent = process.env
-  const env: NodeJS.ProcessEnv = { PATH: parent.PATH, [PAPER_REVIEW_KEY_ENV]: apiKey }
-  if (process.platform === 'win32') {
-    env.SystemRoot = parent.SystemRoot
-    env.TEMP = parent.TEMP
-    env.TMP = parent.TMP
-  } else {
-    env.HOME = parent.HOME
-    env.TMPDIR = parent.TMPDIR
-  }
-  return env
-}
-
-/** Map any thrown run/construction failure to a typed, key-free error. */
-function toHarnessError(error: unknown): PaperReviewHarnessError {
-  return {
-    code: 'run-failed',
-    message: error instanceof Error ? error.message : 'Harness run failed without a message.',
-    recoverable: true,
-  }
-}
+const defaultRemoveTempRoot: (root: string) => void = (root) => rmSync(root, { recursive: true, force: true })
 
 /**
  * Run one paper review through a fresh isolated Harness.
  * @param input - the validated provider/model configuration and API key.
- * @param pages - per-page extracted text and candidate headings.
+ * @param request - purpose and exact application-owned prompt.
  * @param dependencies - injectable seams (defaults to the real SDK factory).
+ * @param options - per-invocation lifecycle knobs. When `options.signal`
+ *   aborts, the in-flight run is settled, the one owned dsh child is closed via
+ *   a memoized `close()`, and the temporary home is removed before returning a
+ *   terminal `cancelled` result (unless cleanup itself failed, which wins).
  * @returns the raw assistant response, or a typed key-free failure.
  */
 export async function runPaperReview(
   input: PaperReviewRunInput,
-  pages: readonly ExtractedPaperPage[],
+  request: PaperReviewModelRequest,
   dependencies: PaperReviewRunnerDependencies = {},
+  options: PaperReviewRunOptions = {},
 ): Promise<PaperReviewHarnessResult> {
   const parsed = PaperReviewRunInputSchema.safeParse(input)
   if (!parsed.success) {
@@ -167,9 +127,16 @@ export async function runPaperReview(
     }
   }
 
+  const signal = options.signal
+  // A pre-aborted signal allocates no temp home and no child process.
+  if (signal?.aborted) {
+    return cancelledResult()
+  }
+
   const harnessFactory = dependencies.harnessFactory ?? defaultHarnessFactory
   const resolveDshBin = dependencies.resolveLocalDshBin ?? defaultResolveLocalDshBin
   const createTempRoot = dependencies.createTempRoot ?? defaultCreateTempRoot
+  const removeTempRoot = dependencies.removeTempRoot ?? defaultRemoveTempRoot
   const resolution = resolveDshBin(process.cwd())
   if (!resolution.ok) {
     return {
@@ -177,52 +144,119 @@ export async function runPaperReview(
       error: { code: resolution.error.code, message: resolution.error.message, recoverable: true },
     }
   }
-  const tempRoot = createTempRoot()
+  if (signal?.aborted) {
+    return cancelledResult()
+  }
+
+  let tempRoot: string
+  try {
+    tempRoot = createTempRoot()
+  } catch (error) {
+    // No root was allocated, so there is nothing to close or remove: a failed
+    // temp-home allocation is a typed run failure, never a rejected promise.
+    return { success: false, error: toHarnessError(error) }
+  }
   let harness: HarnessLike | undefined
   let cleanupFailed = false
+  let aborted = false
+  let closedPromise: Promise<void> | undefined
+  // Memoized close: exactly one `close()` regardless of how many times abort
+  // fires or how the reaped run rejects afterwards.
+  const memoizedClose = (): Promise<void> => {
+    const currentHarness = harness
+    if (currentHarness === undefined) {
+      return Promise.resolve()
+    }
+    closedPromise ??= Promise.resolve()
+      .then(() => currentHarness.close())
+      .then(
+        () => undefined,
+        () => { cleanupFailed = true },
+      )
+    return closedPromise
+  }
+
+  // Resolves the run/abort race the moment the caller's signal aborts.
+  let settleAbort: (() => void) | undefined
+  const abortSettle = new Promise<{ readonly kind: 'cancelled' }>((resolve) => {
+    settleAbort = () => resolve({ kind: 'cancelled' })
+  })
+  const onAbort = (): void => {
+    aborted = true
+    void memoizedClose()
+    settleAbort?.()
+  }
+  signal?.addEventListener('abort', onAbort, { once: true })
+  if (signal?.aborted) {
+    onAbort()
+  }
 
   let result: PaperReviewHarnessResult
   try {
-    const patchPath = join(tempRoot, 'overlay.cordis.yml')
-    writeFileSync(patchPath, buildOverlayPatch(parsed.data))
+    if (aborted) {
+      result = cancelledResult()
+    } else {
+      const patchPath = join(tempRoot, 'overlay.cordis.yml')
+      writeFileSync(patchPath, buildOverlayPatch(parsed.data))
 
-    harness = harnessFactory({
-      profile: 'sdk-minimal',
-      patches: [patchPath],
-      dshHome: tempRoot,
-      processCwd: tempRoot,
-      cwd: tempRoot,
-      provider: PAPER_REVIEW_ROUTE,
-      model: parsed.data.model,
-      env: buildChildEnv(parsed.data.apiKey),
-      dshBin: resolution.dshBin,
-    })
+      harness = harnessFactory({
+        profile: 'sdk-minimal',
+        patches: [patchPath],
+        dshHome: tempRoot,
+        processCwd: tempRoot,
+        cwd: tempRoot,
+        provider: PAPER_REVIEW_ROUTE,
+        model: parsed.data.model,
+        env: buildChildEnv(parsed.data.apiKey),
+        dshBin: resolution.dshBin,
+      })
 
-    const prompt = buildPaperReviewPrompt({
-      providerLabel: parsed.data.providerLabel,
-      model: parsed.data.model,
-      pages,
-    })
-    // No session id: the SDK mints one fresh session per invocation.
-    const runResult = await harness.run(prompt)
-    result = { success: true, finalResponse: runResult.finalResponse }
-  } catch (error) {
-    result = { success: false, error: toHarnessError(error) }
-  } finally {
-    // Close is part of cleanup; harvest a close failure so the temp tree is
-    // removed no matter what, then return a typed cleanup-failed failure.
-    if (harness !== undefined) {
-      try {
-        await harness.close()
-      } catch {
-        cleanupFailed = true
+      if (aborted) {
+        result = cancelledResult()
+      } else {
+        // No session id: the SDK mints one fresh session per invocation.
+        // The SDK has no run-level signal; close() terminates the child.
+        const runOutcome = harness.run(request.prompt).then(
+          (runResult) => ({ kind: 'result' as const, runResult }),
+          (error: unknown) => ({ kind: 'failure' as const, error }),
+        )
+        const outcome = await Promise.race([runOutcome, abortSettle])
+        if (outcome.kind === 'cancelled') {
+          result = cancelledResult()
+        } else if (outcome.kind === 'failure') {
+          result = aborted
+            ? cancelledResult()
+            : { success: false, error: toHarnessError(outcome.error) }
+        } else {
+          result = toRunOutcome(outcome.runResult)
+        }
       }
     }
-    rmSync(tempRoot, { recursive: true, force: true })
+  } catch (error) {
+    if (aborted) {
+      // The abort settled the race, or the reaped run rejected. Cancellation is
+      // terminal unless cleanup also fails (checked after the finally block).
+      result = cancelledResult()
+    } else {
+      result = { success: false, error: toHarnessError(error) }
+    }
+  } finally {
+    // Keep observing disconnects while close is in flight: terminal success is
+    // not returned until the child is reaped and the isolated home is removed.
+    await memoizedClose()
+    signal?.removeEventListener('abort', onAbort)
+    try {
+      removeTempRoot(tempRoot)
+    } catch {
+      cleanupFailed = true
+    }
   }
 
   if (cleanupFailed) {
     return { success: false, error: { code: 'cleanup-failed', message: CLEANUP_FAILED_MESSAGE, recoverable: true } }
+  }
+  if (aborted) {
+    return cancelledResult()
   }
   return result
 }

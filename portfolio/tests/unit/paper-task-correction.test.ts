@@ -4,6 +4,10 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { loadSkillSnapshot } from '../../server/paper-task/skill-resources.mjs'
+import { readSourceDocument, sourceHash } from '../../server/paper-task/source-document.mjs'
+import { snapshotGenerationResources } from '../../server/paper-task/generation-resources'
+import { evaluateBranchQuality } from '../../server/paper-task/branch-quality'
 import { createPaperTaskService } from '../../server/paper-task/coordinator'
 import { createSampleProcessRuntimeFactory } from '../../server/paper-task/runtime'
 import type { PaperTaskSourceResult } from '../../app/utils/paper-task-source-contract'
@@ -47,19 +51,23 @@ describe('paper task source corrections', () => {
   it('marks only the translation master paragraphs that depend on a corrected record', async () => {
     const { service, workspace } = await completedTask('translation')
     const directory = join(workspace, 'drafts', 'translation')
-    const master = '# 主稿\n\n第一段译文。\n\n第二段译文。'
+    const master = '# 主稿\n\n第一段译文。\n\n第二段译文。\n\n待核实：第2页原文无法恢复。'
     writeFileSync(join(directory, 'master.md'), master)
     writeFileSync(join(directory, 'translation.json'), JSON.stringify({
       version: 1,
-      status: 'complete',
+      status: 'incomplete',
       sourceRevision: 1,
       masterSha256: createHash('sha256').update(master).digest('hex'),
       segments: [
-        { index: 0, markdown: '# 主稿\n\n第一段译文。', stale: false, dependencies: [{ recordId: 'p1-r1', revision: 1 }] },
-        { index: 1, markdown: '第二段译文。', stale: false, dependencies: [{ recordId: 'p1-r0', revision: 1 }] },
+        { index: 0, markdown: '# 主稿\n\n第一段译文。', stale: false, dependencies: [
+          { recordId: 'p1-r0', revision: 1 },
+          { recordId: 'p1-r1', revision: 1 },
+        ] },
+        { index: 1, markdown: '第二段译文。', stale: false, dependencies: [{ recordId: 'p1-r2', revision: 1 }] },
+        { index: 2, markdown: '待核实：第2页原文无法恢复。', stale: false, dependencies: [] },
       ],
       terminology: [],
-      unresolved: [],
+      unresolved: [{ recordId: 'p2-r0', reason: '第2页原文无法恢复。' }],
       assets: [],
     }))
 
@@ -68,10 +76,11 @@ describe('paper task source corrections', () => {
     const metadata = JSON.parse(readFileSync(join(directory, 'translation.json'), 'utf8'))
     expect(metadata).toMatchObject({ status: 'needs-update', sourceRevision: 2 })
     expect(metadata.segments[0]).toMatchObject({ index: 0, stale: true, markdown: '# 主稿\n\n第一段译文。' })
-    expect(metadata.segments[1]).toMatchObject({ index: 1, stale: false, markdown: '第二段译文。' })
+    expect(metadata.segments[1]).toMatchObject({ index: 1, stale: true, markdown: '第二段译文。' })
+    expect(metadata.segments[2]).toMatchObject({ index: 2, stale: false, markdown: '待核实：第2页原文无法恢复。' })
     expect(readFileSync(join(directory, 'master.md'), 'utf8')).toBe(master)
     expect(service.translation(ID)).toMatchObject({
-      status: 'needs-update', markdown: master, staleParagraphs: [0], unresolved: [], assets: [],
+      status: 'needs-update', markdown: master, staleParagraphs: [0, 1], unresolved: [{ recordId: 'p2-r0', reason: '第2页原文无法恢复。' }], assets: [],
     })
 
     expect(service.correctSource(ID, {
@@ -80,7 +89,7 @@ describe('paper task source corrections', () => {
     })).toEqual({ kind: 'corrected', revision: 3 })
     const second = JSON.parse(readFileSync(join(directory, 'translation.json'), 'utf8'))
     expect(second).toMatchObject({ status: 'needs-update', sourceRevision: 3 })
-    expect(second.segments.map((segment: { readonly stale: boolean }) => segment.stale)).toEqual([true, true])
+    expect(second.segments.map((segment: { readonly stale: boolean }) => segment.stale)).toEqual([true, true, false])
   })
 
   it('changes only dependent source records and piece states while retaining original and draft bytes', async () => {
@@ -106,6 +115,59 @@ describe('paper task source corrections', () => {
         expect(JSON.parse(readFileSync(join(workspace, 'drafts', branch, 'pieces', `${branch}-${id}.json`), 'utf8')).stale).toBe(true)
       }
     }
+  })
+
+  it.each(['translation', 'deep-reading'] as const)('keeps a v2 %s publication and review readable but stale after correction', async (branch) => {
+    const { service, workspace } = await completedTask(branch)
+    const directory = join(workspace, 'drafts', branch)
+    const source = readSourceDocument(workspace)
+    const skillRoot = join(workspace, 'test-skill')
+    mkdirSync(skillRoot)
+    writeFileSync(join(skillRoot, 'SKILL.md'), 'Read and review the complete manuscript.')
+    snapshotGenerationResources(workspace, [branch], { [branch]: skillRoot })
+    const skill = loadSkillSnapshot(join(workspace, 'generation-resources'), branch)
+    const markdown = `# Retained manuscript\n\n${source.markdown}`
+    const body = branch === 'translation' ? 'master.md' : 'report.md'
+    const metadataFile = branch === 'translation' ? 'translation.json' : 'evidence.json'
+    const entrySha256 = skill.resources.find((item) => item.path === skill.entry)?.sha256
+    const metadata = {
+      version: 2, branch, provenance: 'document-only', manuscriptSha256: sourceHash(markdown),
+      source: {
+        fingerprint: source.metadata.fingerprint, markdownSha256: source.metadata.markdownSha256,
+        pdfSha256: source.metadata.pdfSha256, revision: source.metadata.sourceRevision,
+        byteLength: source.metadata.byteLength, readComplete: true,
+        readRanges: [[0, source.metadata.byteLength]],
+      },
+      skill: {
+        digest: skill.digest, entry: skill.entry, entrySha256,
+        resourcesRead: [{ path: skill.entry, sha256: entrySha256, complete: true }],
+      },
+      limitations: [], referencedAssets: [],
+    }
+    writeFileSync(join(directory, body), markdown)
+    writeFileSync(join(directory, 'preview.md'), markdown)
+    writeFileSync(join(directory, metadataFile), JSON.stringify(metadata))
+    const review = JSON.stringify({
+      version: 2, branch, baselineSha256: metadata.manuscriptSha256,
+      sourceFingerprint: source.metadata.fingerprint, skillDigest: skill.digest,
+      criteria: [{ criterion: 'Review the manuscript', verdict: 'satisfied', notes: 'Review completed.' }],
+      assessment: 'The manuscript was reviewed.', findings: [], repair: null,
+    })
+    writeFileSync(join(directory, 'review.json'), review)
+    const retainedFiles = [body, 'preview.md', metadataFile, 'review.json'].map((filename) => readFileSync(join(directory, filename)))
+    const originalPdf = readFileSync(join(workspace, 'original.pdf'))
+    expect(evaluateBranchQuality(workspace, branch).reviewCompleted).toBe(true)
+
+    expect(service.correctSource(ID, correction('p1-r1', 'Corrected body 47.5%.'))).toEqual({ kind: 'corrected', revision: 2 })
+
+    expect(service.reader(ID)?.documents).toContainEqual(expect.objectContaining({ branch, status: 'needs-confirmation', markdown }))
+    expect(evaluateBranchQuality(workspace, branch)).toMatchObject({ status: 'needs-confirmation', reviewCompleted: true })
+    expect([body, 'preview.md', metadataFile, 'review.json'].map((filename) => readFileSync(join(directory, filename)))).toEqual(retainedFiles)
+    expect(readFileSync(join(workspace, 'original.pdf'))).toEqual(originalPdf)
+    const updatedSource = readSourceDocument(workspace)
+    expect(updatedSource.metadata).toMatchObject({ sourceRevision: 2 })
+    expect(updatedSource.metadata.fingerprint).not.toBe(source.metadata.fingerprint)
+    expect(updatedSource.markdown).not.toBe(source.markdown)
   })
 
   it('corrects a selected single branch without requiring an unselected result', async () => {

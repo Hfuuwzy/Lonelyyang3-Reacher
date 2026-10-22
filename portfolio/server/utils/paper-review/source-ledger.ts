@@ -6,11 +6,19 @@ export interface SourceLine {
   readonly span: PaperSourceSpan
   readonly text: string
   readonly heading: string
+  readonly baselineY?: number
+  readonly column?: number
+  readonly ambiguous?: boolean
+  readonly recognized?: 'table' | 'formula' | 'code'
   readonly exclusion?: { readonly reason: 'bibliography' | 'appendix'; readonly headingAnchor: PaperSourceSpan }
 }
 
 const EXCLUSION_HEADING = /^(?:\d+(?:\.\d+)*\.?\s+)?(references|bibliography|works cited|appendix(?:\s+[a-z0-9]+)?|appendices)$/i
 const BODY_SECTION_HEADING = /^(?:\d+(?:\.\d+)*\.?\s+)?(?:introduction|background|related work|literature review|methods?|methodology|materials and methods|results|discussion|conclusions?|limitations?|acknowledg(?:e)?ments?|data availability|ethics statement|funding|author contributions|conflicts of interest|study design|experiments|findings|analysis)$/i
+// A titled appendix subsection ("A Data Statistic", "B Train Details", "B.1
+// Pre-training") — accepted only after the bibliography scope has begun, so a
+// prose letter in the body never opens appendix scope on its own.
+const APPENDIX_HEADING = /^(?:[A-B](?:\.[0-9]+)?\s+[A-Z][A-Za-z -]*)$/
 
 export function sourceDigest(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex')
@@ -27,13 +35,18 @@ export function sourceLines(pages: readonly ExtractedPaperPage[]): readonly Sour
       const title = anchor[1] ?? ''
       exclusion = { reason: /^appendix(?:\s|$)|^appendices$/i.test(title) ? 'appendix' : 'bibliography', headingAnchor: span }
       heading = line.text
+    } else if (exclusion?.reason === 'bibliography' && APPENDIX_HEADING.test(text)) {
+      exclusion = { reason: 'appendix', headingAnchor: span }
+      heading = line.text
     } else if (exclusion?.reason === 'bibliography' && BODY_SECTION_HEADING.test(text)) {
       heading = line.text
       exclusion = undefined
+    } else if (exclusion?.reason === 'appendix' && APPENDIX_HEADING.test(text)) {
+      heading = line.text
     } else if (exclusion === undefined && (line.isHeading || BODY_SECTION_HEADING.test(text))) {
       heading = line.text
     }
-    return { span, text: line.text, heading, exclusion }
+    return { span, text: line.text, heading, baselineY: line.baselineY, column: line.column, ambiguous: line.ambiguous, recognized: line.recognized, exclusion }
   }))
 }
 

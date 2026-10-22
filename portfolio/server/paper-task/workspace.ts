@@ -25,6 +25,8 @@ export interface PaperTaskWorkspacePaths {
   readonly assetsDir: string
   readonly sourceRecordsDir: string
   readonly sourceStatePath: string
+  readonly sourceMarkdownPath: string
+  readonly sourceMetadataPath: string
   readonly branchDirectories: Readonly<Record<'translation' | 'deep-reading', string>>
 }
 
@@ -38,6 +40,8 @@ export function workspacePaths(root: string): PaperTaskWorkspacePaths {
     assetsDir: join(root, 'assets'),
     sourceRecordsDir: join(root, SOURCE_RECORDS_DIR),
     sourceStatePath: join(root, SOURCE_STATE_NAME),
+    sourceMarkdownPath: join(root, 'source.md'),
+    sourceMetadataPath: join(root, 'source.meta.json'),
     branchDirectories: {
       translation: join(root, 'drafts', 'translation'),
       'deep-reading': join(root, 'drafts', 'deep-reading'),

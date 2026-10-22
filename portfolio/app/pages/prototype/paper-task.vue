@@ -7,24 +7,34 @@
 
   <section v-else class="paper-task" aria-labelledby="paper-task-title">
     <header class="paper-task__heading">
-      <p class="paper-task__stamp" aria-hidden="true">原型</p>
-      <h1 id="paper-task-title" class="paper-task__title">论文任务工作台</h1>
-      <p class="paper-task__lede">
-        单篇 PDF 选择翻译、深读或两者，任务只启动所选分支。此原型固定使用 DSH 0.1.7-rc.2。
-        仅通过开发服务器提供，不属于生产站点内容。
-      </p>
-      <p class="paper-task__note">
-        卡片会区分 SAMPLE 与生成文本预览。预览未完成且未经质量检查，不代表翻译准确、内容完整，也不能据此认定模型已完整理解图像或通过验收。
-      </p>
-      <p class="paper-task__note">
-        提供方图像输入能力仅为声明，尚未逐端点验证。启用后，任务会在应用边界内发送原始表格、公式与算法 PNG 裁剪及对应的原始上下文；不保证所有素材都会发送，请查阅各素材状态。
-      </p>
-      <NuxtLink class="paper-task__settings-link" :to="localePath('/prototype/api-settings')">
-        论文任务 API 设置
+      <div class="paper-task__heading-main">
+        <div class="paper-task__heading-kicker">
+          <p class="paper-task__stamp" aria-hidden="true">原型</p>
+          <span>本地论文任务</span>
+        </div>
+        <h1 id="paper-task-title" class="paper-task__title">论文任务工作台</h1>
+        <p class="paper-task__lede">
+          指定一篇论文，按需生成翻译、深读或两者；任务只运行你选择的分支。
+        </p>
+      </div>
+
+      <NuxtLink class="paper-task__settings-action" :to="localePath('/prototype/api-settings')">
+        <span class="paper-task__settings-mark" aria-hidden="true">API</span>
+        <span class="paper-task__settings-copy">
+          <strong>论文任务 API 设置</strong>
+          <small>配置提供方、模型与密钥</small>
+        </span>
+        <span class="paper-task__settings-arrow" aria-hidden="true">↗</span>
       </NuxtLink>
-      <NuxtLink class="paper-task__settings-link" :to="localePath('/prototype/paper-review')">
-        ← 返回论文审阅工作台
-      </NuxtLink>
+
+      <details class="paper-task__limits">
+        <summary>原型能力与限制</summary>
+        <div class="paper-task__limits-copy">
+          <p>此原型固定使用 DSH 0.1.7-rc.2，仅通过开发服务器提供，不属于生产站点内容。</p>
+          <p>结果会区分 SAMPLE 与生成文本预览；预览未完成且未经质量检查，不代表翻译准确、内容完整或通过验收。</p>
+          <p>图像输入能力仅为提供方声明，尚未逐端点验证。启用后可能发送原始表格、公式与算法 PNG 裁剪及对应上下文；请以素材状态为准。</p>
+        </div>
+      </details>
     </header>
 
     <form
@@ -32,41 +42,66 @@
       class="paper-task__form"
       @submit.prevent="handleSubmit"
     >
-      <div v-if="!sourceFallbackAvailable" class="paper-task__field">
-        <label class="paper-task__label" for="paper-task-source-url">论文链接（当前支持 arXiv）</label>
-        <input
-          id="paper-task-source-url"
-          v-model.trim="sourceUrl"
-          class="paper-task__input"
-          type="url"
-          inputmode="url"
-          autocomplete="url"
-          placeholder="https://arxiv.org/abs/2404.05961"
-          :disabled="actionPending !== null || pdfFile !== null"
-        />
-        <p class="paper-task__note">仅获取你指定的一篇论文，不会搜索或推荐其他论文。也可直接上传 PDF。</p>
+      <div class="paper-task__form-heading">
+        <div>
+          <p class="paper-task__form-kicker">步骤 01 <span>／</span> 论文来源</p>
+          <h2 class="paper-task__form-title">
+            {{ sourceFallbackAvailable ? '换用 PDF 继续' : '选择论文来源' }}
+          </h2>
+          <p class="paper-task__form-lede">
+            {{ sourceFallbackAvailable ? '链接暂不可用，上传这篇论文的 PDF 即可继续。' : '粘贴 arXiv 链接或上传 PDF；只处理这一篇论文。' }}
+          </p>
+        </div>
+        <span class="paper-task__scope">单篇任务</span>
       </div>
 
-      <div class="paper-task__field">
-        <label class="paper-task__label" for="paper-task-pdf">
-          {{ sourceFallbackAvailable ? '上传 PDF 继续' : '或直接上传论文 PDF' }}
-        </label>
-        <input
-          id="paper-task-pdf"
-          :key="taskId ?? 'pending-file'"
-          class="paper-task__input"
-          type="file"
-          accept="application/pdf"
-          :disabled="actionPending !== null || (!sourceFallbackAvailable && sourceUrl.trim() !== '')"
-          @change="onPdfChange"
-        />
-        <p v-if="sourceFallbackAvailable" class="paper-task__note" role="status">{{ errorMessage }}</p>
+      <div class="paper-task__sources" :class="{ 'paper-task__sources--fallback': sourceFallbackAvailable }">
+        <div v-if="!sourceFallbackAvailable" class="paper-task__field paper-task__source-panel">
+          <label class="paper-task__label paper-task__source-label" for="paper-task-source-url">
+            <span>论文链接</span>
+            <span class="paper-task__source-chip">arXiv</span>
+          </label>
+          <input
+            id="paper-task-source-url"
+            v-model.trim="sourceUrl"
+            class="paper-task__input paper-task__url-input"
+            type="url"
+            inputmode="url"
+            autocomplete="url"
+            placeholder="https://arxiv.org/abs/2404.05961"
+            :disabled="actionPending !== null || pdfFile !== null"
+          />
+          <p class="paper-task__source-hint">粘贴 arXiv 论文页面链接</p>
+        </div>
+
+        <div class="paper-task__field paper-task__source-panel paper-task__source-panel--upload">
+          <label class="paper-task__label paper-task__source-label" for="paper-task-pdf">
+            <span>{{ sourceFallbackAvailable ? '上传论文 PDF' : '本地 PDF' }}</span>
+            <span class="paper-task__source-chip">PDF</span>
+          </label>
+          <input
+            id="paper-task-pdf"
+            :key="taskId ?? 'pending-file'"
+            class="paper-task__input paper-task__file-input"
+            type="file"
+            accept="application/pdf"
+            :disabled="actionPending !== null || (!sourceFallbackAvailable && sourceUrl.trim() !== '')"
+            @change="onPdfChange"
+          />
+          <p v-if="sourceFallbackAvailable" class="paper-task__fallback-note" role="status">{{ errorMessage }}</p>
+          <p v-else class="paper-task__source-hint">链接无法读取时，也可以从 PDF 继续</p>
+        </div>
       </div>
 
-      <fieldset class="paper-task__field" :disabled="actionPending !== null">
-        <legend class="paper-task__label">任务分支</legend>
+      <fieldset class="paper-task__field paper-task__selection" :disabled="actionPending !== null">
+        <legend class="paper-task__label paper-task__selection-label">选择生成内容 <span>按需选择分支</span></legend>
         <div class="paper-task__radios">
-          <label v-for="option in selectionOptions" :key="option.value" class="paper-task__radio">
+          <label
+            v-for="option in selectionOptions"
+            :key="option.value"
+            class="paper-task__radio"
+            :class="{ 'paper-task__radio--selected': selection === option.value }"
+          >
             <input v-model="selection" type="radio" name="selection" :value="option.value" />
             <span>{{ option.label }}</span>
           </label>
@@ -80,12 +115,12 @@
       <div class="paper-task__actions">
         <button
           type="submit"
-          class="paper-task__button"
+          class="paper-task__button paper-task__button--primary"
           :disabled="(pdfFile === null && (sourceUrl.trim() === '' || sourceFallbackAvailable)) || actionPending !== null"
         >
           {{ sourceFallbackAvailable ? '使用 PDF 继续' : '启动任务' }}
         </button>
-        <button v-if="sourceFallbackAvailable" type="button" class="paper-task__button" @click="handleResetError">
+        <button v-if="sourceFallbackAvailable" type="button" class="paper-task__button paper-task__button--quiet" @click="handleResetError">
           返回链接输入
         </button>
       </div>
@@ -94,7 +129,16 @@
     <div v-if="phase === 'error' && !sourceFallbackAvailable" class="paper-task__error" role="alert">
       <p>{{ errorMessage }}</p>
       <div class="paper-task__actions">
-        <button type="button" class="paper-task__button" :disabled="actionPending !== null" @click="handleResetError">返回</button>
+        <NuxtLink
+          v-if="providerSettingsRequired"
+          class="paper-task__button paper-task__button--primary"
+          :to="localePath('/prototype/api-settings')"
+        >
+          前往配置 API 设置
+        </NuxtLink>
+        <button type="button" class="paper-task__button" :disabled="actionPending !== null" @click="handleResetError">
+          {{ providerSettingsRequired ? '返回重新选择论文' : '返回' }}
+        </button>
         <button
           v-if="taskId !== null"
           type="button"
@@ -195,6 +239,7 @@ const {
   pdfFile,
   sourceUrl,
   sourceFallbackAvailable,
+  providerSettingsRequired,
   selection,
   phase,
   taskId,
@@ -263,27 +308,6 @@ function onPdfChange(event: Event): void {
 <style scoped src="~/assets/css/paper-task.css"></style>
 
 <style scoped>
-.paper-task__settings-link {
-  display: inline-flex;
-  align-items: center;
-  min-block-size: 2.75rem;
-  margin-block-start: 0.5rem;
-  color: var(--ink);
-  font-family: var(--font-mincho);
-  text-decoration: underline;
-  text-decoration-color: var(--rule);
-  text-underline-offset: 0.2em;
-}
-
-.paper-task__settings-link:hover {
-  text-decoration-color: var(--ink);
-}
-
-.paper-task__settings-link:focus-visible {
-  outline: 3px solid var(--vermilion);
-  outline-offset: 2px;
-}
-
 .paper-task__preview-issues,
 .paper-task__preview-options {
   margin: 0;

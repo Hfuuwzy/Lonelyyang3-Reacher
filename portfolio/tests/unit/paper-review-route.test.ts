@@ -9,7 +9,7 @@ import {
   type PaperReviewMultipartPart,
 } from '../../server/utils/paper-review/multipart'
 import type { ExtractedPaperPage, PaperExtractionFailure, PaperExtractionSuccess } from '../../server/utils/paper-review/pdf'
-import type { PaperReviewHarnessFailure, PaperReviewHarnessSuccess } from '../../server/utils/paper-review/harness'
+import type { PaperReviewHarnessFailure, PaperReviewHarnessResult, PaperReviewHarnessSuccess } from '../../server/utils/paper-review/harness'
 import type { PaperReviewReportResult } from '../../server/utils/paper-review/report'
 import type { PaperReviewStreamEvent } from '../../app/utils/paper-review-contract'
 
@@ -112,15 +112,33 @@ function stagesOf(events: readonly PaperReviewStreamEvent[]): string[] {
   return events.flatMap((event) => (event.type === 'stage' ? [event.stage] : []))
 }
 
+const REPORT_RESPONSE = JSON.stringify({
+  sections: [
+    {
+      kind: 'claims',
+      title: 'Claims',
+      findings: [
+        {
+          statement: 'The fixture preserves layout for print.',
+          source: { heading: '1 Introduction', readerPage: 1, quote: 'The quick brown fox jumps over the lazy dog.' },
+        },
+      ],
+    },
+  ],
+})
+
 function successDeps() {
   const extract = vi.fn(async (): Promise<PaperExtractionSuccess> => ({ success: true, pageCount: 1, pages: FAKE_PAGES }))
-  const run = vi.fn(async (): Promise<PaperReviewHarnessSuccess> => ({ success: true, finalResponse: JSON.stringify({ sections: [] }) }))
+  const run = vi.fn(async (_input: unknown, request: { readonly purpose: string }): Promise<PaperReviewHarnessResult> => ({
+    success: true,
+    finalResponse: request.purpose === 'report' ? REPORT_RESPONSE : JSON.stringify({ sections: [] }),
+  }))
   const verify = vi.fn((): PaperReviewReportResult => ({ success: true, report: EXPECTED_REPORT }))
   return { extract, run, verify }
 }
 
 describe('createPaperReviewEvents happy path', () => {
-  it('emits the four stages in order and ends in the verifier report', async () => {
+  it('emits the six stages in order and ends in the task result', async () => {
     // Given: a valid multipart form and fakes for every dependency.
     const { extract, run, verify } = successDeps()
 
@@ -129,32 +147,30 @@ describe('createPaperReviewEvents happy path', () => {
       createPaperReviewEvents(validParts(), { extractPaperPages: extract, runPaperReview: run, verifyPaperReview: verify }),
     )
 
-    // Then: the stages arrive in protocol order and the report is terminal.
-    expect(stagesOf(events)).toEqual(['validating', 'extracting', 'analyzing', 'verifying'])
+    // Then: the stages arrive in protocol order and a result is terminal.
+    expect(stagesOf(events)).toEqual(['validating', 'extracting', 'inventorying', 'analyzing', 'translating', 'verifying'])
     const terminal = lastEvent(events)
-    expect(terminal.type).toBe('report')
-    if (terminal.type === 'report') {
-      expect(terminal.report).toEqual(EXPECTED_REPORT)
+    expect(terminal.type).toBe('result')
+    if (terminal.type === 'result') {
+      expect(terminal.result).toMatchObject({ status: 'incomplete', provider: PROVIDER, model: MODEL })
     }
   })
 
-  it('returns the verifier report verbatim, never fabricating a citation', async () => {
+  it('carries the verifier report as the result report subartifact, never fabricating a citation', async () => {
     // Given: a verifier that grounds one finding on the fixture page.
     const { extract, run, verify } = successDeps()
 
-    // When: the pipeline reaches the terminal report.
+    // When: the pipeline reaches the terminal result.
     const events = await consume(
       createPaperReviewEvents(validParts(), { extractPaperPages: extract, runPaperReview: run, verifyPaperReview: verify }),
     )
     const terminal = lastEvent(events)
 
-    // Then: the report is exactly the verifier's always-incomplete report with
-    // the grounded source quote intact (reader page, heading, and quote).
-    expect(terminal.type).toBe('report')
-    if (terminal.type === 'report') {
-      expect(terminal.report.status).toBe('incomplete')
-      expect(terminal.report.missingScope).toEqual(['full-translation'])
-      expect(terminal.report.sections[0]?.findings[0]?.source).toEqual({
+    // Then: the report subartifact is exactly the verifier's always-incomplete
+    // report with the grounded source quote intact (reader page, heading, quote).
+    expect(terminal.type).toBe('result')
+    if (terminal.type === 'result') {
+      expect(terminal.result.report?.sections[0]?.findings[0]?.source).toEqual({
         heading: '1 Introduction',
         readerPage: 1,
         quote: 'The quick brown fox jumps over the lazy dog.',
@@ -162,20 +178,25 @@ describe('createPaperReviewEvents happy path', () => {
     }
   })
 
-  it('invokes the runner exactly once with the validated input', async () => {
+  it('invokes the runner once per model purpose with the validated input', async () => {
     // Given: a fake runner that records its arguments.
     const { extract, run, verify } = successDeps()
 
     // When: the pipeline completes.
     await consume(createPaperReviewEvents(validParts(), { extractPaperPages: extract, runPaperReview: run, verifyPaperReview: verify }))
 
-    // Then: each dependency ran exactly once and the runner saw the parsed input.
+    // Then: extraction runs once and the runner serves all four model purposes;
+    // the report call carries the validated input and the extracted page text.
     expect(extract).toHaveBeenCalledTimes(1)
-    expect(run).toHaveBeenCalledTimes(1)
-    expect(verify).toHaveBeenCalledTimes(1)
+    expect(run).toHaveBeenCalledTimes(4)
     expect(run).toHaveBeenCalledWith(
       expect.objectContaining({ providerLabel: PROVIDER, baseUrl: BASE_URL, protocol: PROTOCOL, model: MODEL, apiKey: API_KEY }),
-      FAKE_PAGES,
+      expect.objectContaining({
+        purpose: 'report',
+        prompt: expect.stringContaining('The quick brown fox jumps over the lazy dog.'),
+      }),
+      undefined,
+      expect.objectContaining({ signal: undefined }),
     )
   })
 })
@@ -204,39 +225,44 @@ describe('createPaperReviewEvents failure paths', () => {
     expect(verify).not.toHaveBeenCalled()
   })
 
-  it('stops at an analyzing failure with a safe message', async () => {
-    // Given: a runner that fails carrying a credential-like SDK message.
+  it('localizes an analyzing run failure and still reaches translation and review', async () => {
+    // Given: an extractor that succeeds and a runner that fails only on the report purpose.
     const extract = vi.fn(async (): Promise<PaperExtractionSuccess> => ({ success: true, pageCount: 1, pages: FAKE_PAGES }))
-    const run = vi.fn(async (): Promise<PaperReviewHarnessFailure> => ({ success: false, error: { code: 'run-failed', message: 'SDK blew up: sk-secret', recoverable: true } }))
+    const run = vi.fn(async (_input: unknown, request: { readonly purpose: string }): Promise<PaperReviewHarnessResult> =>
+      request.purpose === 'report'
+        ? { success: false, error: { code: 'run-failed', message: 'SDK blew up: sk-secret', recoverable: true } }
+        : { success: true, finalResponse: '{}' },
+    )
     const verify = vi.fn()
 
-    // When: the model run fails.
+    // When: the model report run fails but is not fatal (only cancel/cleanup are fatal).
     const events = await consume(createPaperReviewEvents(validParts(), { extractPaperPages: extract, runPaperReview: run, verifyPaperReview: verify }))
 
-    // Then: the stream stops at the analyzing stage and never verifies.
-    expect(stagesOf(events)).toEqual(['validating', 'extracting', 'analyzing'])
+    // Then: the report failure localizes, the pipeline still reaches translation
+    // and review, and the stream ends in a terminal incomplete result — with no
+    // secret leaked into any error event.
+    expect(stagesOf(events)).toEqual(['validating', 'extracting', 'inventorying', 'analyzing', 'translating', 'verifying'])
     const terminal = lastEvent(events)
-    expect(terminal.type).toBe('error')
-    if (terminal.type === 'error') {
-      expect(terminal.stage).toBe('analyzing')
-      expect(terminal.code).toBe('run-failed')
-      expect(terminal.message).toBe('模型服务暂不可用，请稍后重试。')
-      expect(terminal.message).not.toContain('sk-secret')
-    }
+    expect(terminal.type).toBe('result')
+    expect(events.some((event) => event.type === 'error' && JSON.stringify(event).includes('sk-secret'))).toBe(false)
     expect(verify).not.toHaveBeenCalled()
   })
 
   it('maps a cleanup-failed analyzing result to a safe terminal error and never verifies', async () => {
-    // Given a runner whose cleanup close fails carrying a credential-like detail.
+    // Given a runner whose report cleanup close fails carrying a credential-like detail.
     const extract = vi.fn(async (): Promise<PaperExtractionSuccess> => ({ success: true, pageCount: 1, pages: FAKE_PAGES }))
-    const run = vi.fn(async (): Promise<PaperReviewHarnessFailure> => ({ success: false, error: { code: 'cleanup-failed', message: 'SDK cleanup nearby sk-secret-close', recoverable: true } }))
+    const run = vi.fn(async (_input: unknown, request: { readonly purpose: string }): Promise<PaperReviewHarnessResult> =>
+      request.purpose === 'report'
+        ? { success: false, error: { code: 'cleanup-failed', message: 'SDK cleanup nearby sk-secret-close', recoverable: true } }
+        : { success: true, finalResponse: '{}' },
+    )
     const verify = vi.fn()
 
-    // When the model run reports a cleanup failure.
+    // When the model report run reports a cleanup failure.
     const events = await consume(createPaperReviewEvents(validParts(), { extractPaperPages: extract, runPaperReview: run, verifyPaperReview: verify }))
 
     // Then the stream ends at the analyzing stage with an actionable safe error.
-    expect(stagesOf(events)).toEqual(['validating', 'extracting', 'analyzing'])
+    expect(stagesOf(events)).toEqual(['validating', 'extracting', 'inventorying', 'analyzing'])
     const terminal = lastEvent(events)
     expect(terminal.type).toBe('error')
     if (terminal.type === 'error') {
@@ -248,24 +274,28 @@ describe('createPaperReviewEvents failure paths', () => {
     expect(verify).not.toHaveBeenCalled()
   })
 
-  it('stops at a verifying failure and never emits a report', async () => {
-    // Given: a verifier that rejects the raw response.
-    const { extract, run } = successDeps()
+  it('localizes an unusable report response as a partial report and still emits a result', async () => {
+    // Given: a runner whose report purpose returns non-JSON, so evidence parsing cannot accept it.
+    const extract = vi.fn(async (): Promise<PaperExtractionSuccess> => ({ success: true, pageCount: 1, pages: FAKE_PAGES }))
+    const run = vi.fn(async (_input: unknown, request: { readonly purpose: string }): Promise<PaperReviewHarnessResult> =>
+      request.purpose === 'report'
+        ? { success: true, finalResponse: '{ definitely not json' }
+        : { success: true, finalResponse: '{}' },
+    )
     const verify = vi.fn((): PaperReviewReportResult => ({ success: false, error: { code: 'malformed-report', message: 'raw' } }))
 
-    // When: verification fails.
+    // When: the report response cannot be parsed into grounded evidence notes.
     const events = await consume(createPaperReviewEvents(validParts(), { extractPaperPages: extract, runPaperReview: run, verifyPaperReview: verify }))
 
-    // Then: all four stages run but the stream ends in a verifying error.
-    expect(stagesOf(events)).toEqual(['validating', 'extracting', 'analyzing', 'verifying'])
+    // Then: the unusable report batch localizes as a partial (overall-gap) report,
+    // translation/review still run, and the stream ends in a terminal result.
+    expect(stagesOf(events)).toEqual(['validating', 'extracting', 'inventorying', 'analyzing', 'translating', 'verifying'])
     const terminal = lastEvent(events)
-    expect(terminal.type).toBe('error')
-    if (terminal.type === 'error') {
-      expect(terminal.stage).toBe('verifying')
-      expect(terminal.code).toBe('malformed-report')
-      expect(terminal.message).toBe('模型返回的内容不符合审阅报告格式，本次审阅结果不可用。')
+    expect(terminal.type).toBe('result')
+    if (terminal.type === 'result') {
+      expect(terminal.result.report?.gaps.some(gap => gap.section === 'overall')).toBe(true)
     }
-    expect(events.some((event) => event.type === 'report')).toBe(false)
+    expect(verify).not.toHaveBeenCalled()
   })
 })
 
@@ -530,10 +560,10 @@ describe('paper-review SSE contract', () => {
     const events = await consume(createPaperReviewEvents(validParts(), { extractPaperPages: extract, runPaperReview: run, verifyPaperReview: verify }))
     const chunks = events.map((event) => `data: ${JSON.stringify(event)}\n\n`)
 
-    // Then: there are exactly 5 chunks (4 stages + report), each well-formed SSE.
-    expect(chunks).toHaveLength(5)
+    // Then: there are exactly 7 chunks (6 stages + result), each well-formed SSE.
+    expect(chunks).toHaveLength(7)
     expect(chunks[0]).toBe('data: {"type":"stage","stage":"validating"}\n\n')
-    expect(chunks[4]).toBe(`data: ${JSON.stringify(events[4])}\n\n`)
+    expect(chunks[6]).toBe(`data: ${JSON.stringify(events[6])}\n\n`)
     for (const chunk of chunks) {
       expect(chunk.startsWith('data: ')).toBe(true)
       expect(chunk.endsWith('\n\n')).toBe(true)

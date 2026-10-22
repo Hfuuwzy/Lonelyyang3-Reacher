@@ -21,7 +21,7 @@
         </div>
 
         <div class="paper-task-reader__toolbar-context">
-          <span>{{ activeDocument === null ? '阅读成果' : branchLabel(activeDocument.branch) }}</span>
+          <span>{{ activeDocument === null ? '阅读成果' : paperTaskReaderDocumentLabel(activeDocument.branch, activeDocument.status) }}</span>
           <span v-if="titlePassed && title !== ''" class="paper-task-reader__short-title" :title="title">{{ title }}</span>
         </div>
 
@@ -33,23 +33,15 @@
             type="button"
             class="paper-task-reader__toolbar-button"
             :disabled="!view.pdfs.translated.available"
-            @click="openPdf('translated', 'open')"
+            @click="openPdf('translated')"
           >
             打开译文 PDF
           </button>
           <button
             type="button"
-            class="paper-task-reader__toolbar-button"
-            :disabled="!view.pdfs.translated.available"
-            @click="openPdf('translated', 'download')"
-          >
-            下载译文 PDF
-          </button>
-          <button
-            type="button"
             class="paper-task-reader__toolbar-button paper-task-reader__original-action"
             :disabled="!view.pdfs.original.available"
-            @click="openPdf('original', 'open')"
+            @click="openPdf('original')"
           >
             原论文 ↗
           </button>
@@ -74,22 +66,24 @@
             :data-branch="document.branch"
             @click="selectBranch(document.branch)"
           >
-            {{ branchLabel(document.branch) }}
+            {{ paperTaskReaderDocumentLabel(document.branch, document.status) }}
           </button>
         </nav>
 
-        <template v-if="activeDocument !== null">
+          <template v-if="activeDocument !== null">
           <header class="paper-task-reader__article-head">
             <p class="paper-task-reader__eyebrow">
-              {{ branchLabel(activeDocument.branch) }} · {{ statusLabel(activeDocument.status) }}
+              {{ paperTaskReaderDocumentLabel(activeDocument.branch, activeDocument.status) }} · {{ statusLabel(activeDocument.status) }}
             </p>
             <h1 ref="articleTitle" class="paper-task-reader__title">
-              {{ title === '' ? branchLabel(activeDocument.branch) : title }}
+              {{ title === '' ? paperTaskReaderDocumentLabel(activeDocument.branch, activeDocument.status) : title }}
             </h1>
             <p v-if="activeDocument.notice !== null" class="paper-task-reader__notice" role="status">
               {{ activeDocument.notice }}
             </p>
           </header>
+
+          <PaperTaskExportActions :task-id="currentView.taskId" :document="activeDocument" @updated="updateView" />
 
           <div class="paper-task-reader__body" v-html="activeDocument.html" />
 
@@ -163,12 +157,14 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type WatchStopHandle } from 'vue'
+import PaperTaskExportActions from '~/components/prototype/PaperTaskExportActions.vue'
 import type {
   PaperTaskReaderBranch,
   PaperTaskReaderDocumentStatus,
   PaperTaskReaderView,
 } from '~/utils/paper-task-reader-contract'
 import { paperTaskPdfPath } from '~/utils/paper-task-reader-contract'
+import { paperTaskReaderDocumentLabel } from '~/utils/paper-task-reader-labels'
 import { renderPaperTaskReaderMarkdown } from '~/utils/paper-task-markdown'
 import {
   paperTaskSourceAssetIdSchema,
@@ -184,11 +180,8 @@ interface Props {
 
 const props = defineProps<Props>()
 const emit = defineEmits<{ readonly close: [] }>()
-
-const BRANCH_LABELS: Record<PaperTaskReaderBranch, string> = {
-  translation: '全文译文',
-  'deep-reading': '深读报告',
-}
+const currentView = ref(props.view)
+watch(() => props.view, (view) => { currentView.value = view })
 
 const STATUS_LABELS: Record<PaperTaskReaderDocumentStatus, string> = {
   preview: '未完成预览',
@@ -197,8 +190,8 @@ const STATUS_LABELS: Record<PaperTaskReaderDocumentStatus, string> = {
 }
 
 const renderedDocuments = computed(() => {
-  const taskId = paperTaskSourceTaskIdSchema.safeParse(props.view.taskId)
-  return props.view.documents.map((document) => {
+  const taskId = paperTaskSourceTaskIdSchema.safeParse(currentView.value.taskId)
+  return currentView.value.documents.map((document) => {
     const urls = new Map<string, string>()
     if (taskId.success) {
       for (const asset of document.assets) {
@@ -245,10 +238,6 @@ let titleObserver: IntersectionObserver | undefined
 let toolbarObserver: ResizeObserver | undefined
 let stopActiveBranchWatch: WatchStopHandle | undefined
 
-function branchLabel(branch: PaperTaskReaderBranch): string {
-  return BRANCH_LABELS[branch]
-}
-
 function statusLabel(status: PaperTaskReaderDocumentStatus): string {
   return STATUS_LABELS[status]
 }
@@ -258,20 +247,20 @@ function selectBranch(branch: PaperTaskReaderBranch): void {
   closeDrawer(false)
 }
 
-function openPdf(kind: 'original' | 'translated', action: 'open' | 'download'): void {
-  const state = kind === 'original' ? props.view.pdfs.original : props.view.pdfs.translated
+function openPdf(kind: 'original' | 'translated'): void {
+  const state = kind === 'original' ? currentView.value.pdfs.original : currentView.value.pdfs.translated
   if (!state.available) return
   const link = document.createElement('a')
-  link.href = paperTaskPdfPath(props.view.taskId, kind, action)
-  if (action === 'download') {
-    link.download = kind === 'original' ? 'original-paper.pdf' : 'translated-paper.pdf'
-  } else {
-    link.target = '_blank'
-    link.rel = 'noopener'
-  }
+  link.href = paperTaskPdfPath(currentView.value.taskId, kind, 'open')
+  link.target = '_blank'
+  link.rel = 'noopener'
   document.body.append(link)
   link.click()
   link.remove()
+}
+
+function updateView(view: PaperTaskReaderView): void {
+  currentView.value = view
 }
 
 function closeDrawer(restore = true): void {

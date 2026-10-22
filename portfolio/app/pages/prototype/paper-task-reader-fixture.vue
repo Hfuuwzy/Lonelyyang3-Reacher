@@ -74,6 +74,7 @@ const view: PaperTaskReaderView = {
         caption: '受控示意图（本地夹具）',
         availability: 'available',
       }],
+      formats: fixtureFormats('translation'),
     },
     {
       branch: 'deep-reading',
@@ -81,12 +82,29 @@ const view: PaperTaskReaderView = {
       notice: '报告保留了未完成或未核实材料；已有可读内容保留，请返回任务工作台核对原文资料。',
       markdown: secondMarkdown,
       assets: [],
+      formats: fixtureFormats('deep-reading'),
     },
   ],
   pdfs: {
     original: { available: true, message: '原论文 PDF 可查看。' },
     translated: { available: false, message: '译文 PDF 尚未生成或尚未通过全页检查。' },
   },
+}
+
+function fixtureFormats(branch: 'translation' | 'deep-reading') {
+  const file = (format: 'markdown' | 'assets' | 'pdf') => {
+    const names = {
+      markdown: branch === 'translation' ? 'translation.md' : 'deep-reading.md',
+      assets: branch === 'translation' ? 'translation-assets.zip' : 'deep-reading-assets.zip',
+      pdf: branch === 'translation' ? 'translated.pdf' : 'deep-reading.pdf',
+    }
+    return {
+      status: 'unbuilt' as const, build: 'unbuilt' as const, fileName: names[format], available: false,
+      inspectionAvailable: false, finalAvailable: false, pages: [], blockers: [], boundaryVerified: false,
+      message: '尚未构建。',
+    }
+  }
+  return { markdown: file('markdown'), assets: file('assets'), pdf: file('pdf') }
 }
 
 function assetUrl(assetId: string): string | null {

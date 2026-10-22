@@ -12,7 +12,10 @@ function builtState(overrides: Partial<PaperTaskFormatState> = {}): PaperTaskFor
     sourceMasterSha256: HASH,
     artifactMasterSha256: HASH,
     expectedPageCount: 2,
-    pages: [{ page: 1, status: 'passed' }, { page: 2, status: 'passed' }],
+    pages: [
+      { page: 1, status: 'passed', expected: 'Heading is visible.', observed: 'Heading is visible.', evidence: 'Inspected page 1 at 100%.' },
+      { page: 2, status: 'passed', expected: 'Table is complete.', observed: 'Table is complete.', evidence: 'Inspected page 2 at 100%.' },
+    ],
     ...overrides,
   }
 }
@@ -27,31 +30,52 @@ describe('paper task format quality gate', () => {
   })
 
   it('accepts minor page checks', () => {
-    expect(evaluateFormatGate(builtState({ pages: [{ page: 1, status: 'minor' }, { page: 2, status: 'passed' }] })))
+    expect(evaluateFormatGate(builtState({ pages: [
+      { page: 1, status: 'minor', expected: 'Heading is visible.', observed: 'Heading wraps slightly.', evidence: 'Inspected page 1 at 100%.' },
+      { page: 2, status: 'passed', expected: 'Table is complete.', observed: 'Table is complete.', evidence: 'Inspected page 2 at 100%.' },
+    ] })))
       .toEqual({ status: 'complete', issues: [] })
   })
 
   it('requires confirmation when a page is blocked', () => {
-    expect(evaluateFormatGate(builtState({ pages: [{ page: 1, status: 'passed' }, { page: 2, status: 'blocked' }] })).status)
+    expect(evaluateFormatGate(builtState({ pages: [
+      { page: 1, status: 'passed', expected: 'Heading is visible.', observed: 'Heading is visible.', evidence: 'Inspected page 1 at 100%.' },
+      { page: 2, status: 'blocked', expected: 'Table is complete.', observed: 'Last row is clipped.', evidence: 'Inspected page 2 at 100%.' },
+    ] })).status)
       .toBe('needs-confirmation')
   })
 
   it('requires confirmation when a page is missing', () => {
-    expect(evaluateFormatGate(builtState({ pages: [{ page: 1, status: 'passed' }] })).status).toBe('needs-confirmation')
+    expect(evaluateFormatGate(builtState({ pages: [{ page: 1, status: 'passed', expected: 'Heading is visible.', observed: 'Heading is visible.', evidence: 'Inspected page 1 at 100%.' }] })).status).toBe('needs-confirmation')
   })
 
   it('requires confirmation for duplicate pages', () => {
-    expect(evaluateFormatGate(builtState({ pages: [{ page: 1, status: 'passed' }, { page: 1, status: 'passed' }] })).status)
+    const page = { page: 1, status: 'passed' as const, expected: 'Heading is visible.', observed: 'Heading is visible.', evidence: 'Inspected page 1 at 100%.' }
+    expect(evaluateFormatGate(builtState({ pages: [page, page] })).status)
       .toBe('needs-confirmation')
   })
 
   it('requires confirmation for out-of-range pages', () => {
-    expect(evaluateFormatGate(builtState({ pages: [{ page: 1, status: 'passed' }, { page: 3, status: 'passed' }] })).status)
+    expect(evaluateFormatGate(builtState({ pages: [
+      { page: 1, status: 'passed', expected: 'Heading is visible.', observed: 'Heading is visible.', evidence: 'Inspected page 1 at 100%.' },
+      { page: 3, status: 'passed', expected: 'Table is complete.', observed: 'Table is complete.', evidence: 'Inspected page 3 at 100%.' },
+    ] })).status)
       .toBe('needs-confirmation')
   })
 
   it('does not treat a successful build as page evidence', () => {
     expect(evaluateFormatGate(builtState({ pages: undefined })).status).toBe('needs-confirmation')
+  })
+
+  it('requires concrete expected, observed, and evidence notes for every page', () => {
+    expect(evaluateFormatGate(builtState({ pages: [
+      { page: 1, status: 'passed', expected: 'Heading is visible.', observed: 'Heading is visible.' },
+      { page: 2, status: 'passed', expected: 'Table is complete.', observed: 'Table is complete.', evidence: 'Inspected page 2 at 100%.' },
+    ] })).status).toBe('needs-confirmation')
+    expect(evaluateFormatGate(builtState({ pages: [
+      { page: 1, status: 'passed', expected: '  ', observed: 'Heading is visible.', evidence: 'Inspected page 1 at 100%.' },
+      { page: 2, status: 'passed', expected: 'Table is complete.', observed: 'Table is complete.', evidence: 'Inspected page 2 at 100%.' },
+    ] })).status).toBe('needs-confirmation')
   })
 
   it('does not exceed a master that needs confirmation', () => {

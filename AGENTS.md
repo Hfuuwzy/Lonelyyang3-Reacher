@@ -7,6 +7,7 @@
 - Planned sibling: `backend/`.
 - Governance docs: `README.md`, `CONTEXT.md`, `docs/adr/`, `docs/agents/`, `docs/browser-automation-runbook.md`.
 - Machine-local agent tooling (`.opencode/`, `.omo/`, `.codegraph/`, `.playwright-mcp/`) is ignored by `.gitignore` and never committed.
+- Save generated handoff/compaction documents in this workspace's `.opencode/handoff/` directory, not an OS temp or user-profile directory. Keep them local and unstaged; do not commit, push, or upload them unless the user explicitly asks.
 - Keep root-level screenshots, browser captures, and retired plans/specs out of the repo; keep the frontend lockfile under `portfolio/`.
 
 ## Test execution
@@ -41,7 +42,7 @@
 
 ### Issue tracker
 
-Issues and specs live as GitHub issues on `Hfuuwzy/MyWorks`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues and specs live as GitHub issues in `Hfuuwzy/Lonelyyang3-Reacher`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md` for tracker operations and repository identity.
 
 ### Triage labels
 

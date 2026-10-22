@@ -7,6 +7,7 @@ import { IMAGE_LIMITS, type PaperTaskImageReason, type PaperTaskImageReceipt } f
 import type { PaperTaskProviderProtocol, PaperTaskProviderSettings } from '../../app/utils/paper-task-provider-contract'
 import { inspectPaperTaskImageRequest } from './image-wire'
 import type { PreparedPaperTaskImage } from './image-input'
+import { readProviderFailure } from './provider-failure'
 
 type GuardProvider = Pick<PaperTaskProviderSettings, 'baseUrl' | 'protocol' | 'apiKey'>
 type GuardStatus = PaperTaskImageReceipt['status']
@@ -21,19 +22,20 @@ type GuardResult = { readonly baseUrl: string; readonly close: () => Promise<voi
 const ENDPOINTS: Record<PaperTaskProviderProtocol, string> = {
 	'openai-completions': '/chat/completions',
 	'openai-responses': '/responses',
-	'anthropic-messages': '/messages',
+	'anthropic-messages': '/v1/messages',
 }
 const BODY_LIMIT = IMAGE_LIMITS.maxBodyBytes
-const UPSTREAM_TIMEOUT_MS = 120_000
+// Inactivity bound only: long reasoning streams must survive while tokens flow.
+const UPSTREAM_TIMEOUT_MS = 600_000
 
 function sendJson(response: ServerResponse, status: number): void {
 	response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', connection: 'close' })
 	response.end('{"error":"image request blocked"}')
 }
 
-function sendProviderFailure(response: ServerResponse, status: number): void {
+function sendProviderFailure(response: ServerResponse, status: number, message: string): void {
 	response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' })
-	response.end('{"error":"provider request failed"}')
+  response.end(JSON.stringify({ error: message }))
 }
 
 function sendInternalFailure(response: ServerResponse): void {
@@ -163,11 +165,9 @@ export async function startPaperTaskImageGuard(options: GuardOptions): Promise<G
 	const activeTransfers = new Set<() => void>()
 	const server: Server = createServer((request, response) => {
 		let upstreamRequest: ClientRequest | undefined
-		let upstreamTimeout: ReturnType<typeof setTimeout> | undefined
 		let interruptTransfer: (() => void) | undefined
 		const failHandler = (): void => {
 			upstreamRequest?.destroy()
-			if (upstreamTimeout !== undefined) clearTimeout(upstreamTimeout)
 			if (interruptTransfer !== undefined) activeTransfers.delete(interruptTransfer)
 			if (response.destroyed) return
 			if (response.headersSent) response.destroy()
@@ -197,7 +197,10 @@ export async function startPaperTaskImageGuard(options: GuardOptions): Promise<G
 				throw error
 			}
 			const userPromptExists = textPromptExists(options.provider.protocol, parsed)
-			const inspection = await inspectPaperTaskImageRequest(options.provider.protocol, body, { expectedImages: userPromptExists ? options.images : [] })
+			const inspection = await inspectPaperTaskImageRequest(options.provider.protocol, body, {
+				expectedImages: userPromptExists ? options.images : [],
+				allowPartialImages: true,
+			})
 			if (inspection.kind === 'blocked') {
 				finishTransfer({ options, images: options.images, sentAssets }, 'blocked', receiptReason(inspection.reason))
 				sendJson(response, inspection.reason === 'request-too-large' ? 413 : 400)
@@ -226,19 +229,14 @@ export async function startPaperTaskImageGuard(options: GuardOptions): Promise<G
 					upstreamHeadersReached = true
 					const succeeded = upstreamResponse.statusCode !== undefined && upstreamResponse.statusCode >= 200 && upstreamResponse.statusCode < 300
 					finish(succeeded ? 'transported' : 'blocked', succeeded ? null : 'provider-failed')
-					upstreamResponse.on('end', () => {
-						if (upstreamTimeout !== undefined) clearTimeout(upstreamTimeout)
-					})
-					upstreamResponse.on('close', () => {
-						if (upstreamTimeout !== undefined) clearTimeout(upstreamTimeout)
-					})
-					upstreamResponse.once('error', () => response.destroy())
 					const status = upstreamResponse.statusCode ?? 502
 					if (!succeeded) {
-						upstreamResponse.destroy()
-						sendProviderFailure(response, status)
+						void readProviderFailure(upstreamResponse).then((message) => {
+							if (!response.destroyed && !response.headersSent) sendProviderFailure(response, status, message)
+						}).catch(failHandler)
 						return
 					}
+					upstreamResponse.once('error', () => response.destroy())
 					const responseHeaders = Object.fromEntries(Object.entries(upstreamResponse.headers).filter(([name]) => ['content-type', 'cache-control', 'retry-after'].includes(name)))
 					response.writeHead(status, responseHeaders)
 					let responseBytes = 0
@@ -255,14 +253,13 @@ export async function startPaperTaskImageGuard(options: GuardOptions): Promise<G
 				}
 			})
 			upstreamRequest.on('socket', socket => {
+				if (activeSockets.has(socket)) return
 				activeSockets.add(socket)
 				socket.once('close', () => activeSockets.delete(socket))
 			})
-			upstreamTimeout = setTimeout(() => upstreamRequest?.destroy(new Error('provider-timeout')), UPSTREAM_TIMEOUT_MS)
 			upstreamRequest.on('timeout', () => upstreamRequest?.destroy(new Error('provider-timeout')))
 			upstreamRequest.on('error', () => {
 				try {
-					if (upstreamTimeout !== undefined) clearTimeout(upstreamTimeout)
 					finish('blocked', 'provider-failed')
 					if (!response.headersSent) sendJson(response, 502)
 				} catch {

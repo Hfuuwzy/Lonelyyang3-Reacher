@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import type { ExtractedPaperPage } from './pdf'
+import type { PaperSourceUnit } from '../../../app/utils/paper-review-task-contract'
 import { collectStructuralHeadings } from './source-matching'
+import { sourceLines, spanKey } from './source-ledger'
 import { verifyPaperReviewSource } from '../../paper-review-internal/report-source-verifier'
 import {
   PAPER_REVIEW_MISSING_SCOPE,
@@ -81,6 +83,69 @@ const GAP_REASON_CITATION =
 const GAP_REASON_PRINTED_PAGE = '该章节存在未能独立验证的印刷页标签，该印刷页信息已省略。'
 const GAP_REASON_HEADING_UNLOCATED =
   '该章节存在未指明所属章节标题的论断（引文已核验但模型未标注所属章节标题），该论断仍被保留。'
+
+const OUT_OF_SCOPE_LINE = '[out-of-scope content omitted]'
+
+/**
+ * The source lines that must never be cited as substantive report evidence:
+ * bibliography/reference entries (excluded reason `bibliography`) and
+ * standalone page-number noise. Appendix content (excluded reason `appendix`)
+ * stays citable — it holds methods, hyperparameters and experiments — and
+ * formulas/table content are experimental evidence, so both remain in the
+ * report input. Unresolved (geometrically ambiguous) body content stays visible.
+ */
+function isOutOfScopeUnit(unit: PaperSourceUnit): boolean {
+  if (unit.kind === 'excluded') {
+    return unit.reason === 'bibliography'
+  }
+  return unit.kind === 'preserved-original' && unit.reason === 'page-number'
+}
+
+/** Line-level (readerPage:lineIndex) mask of every out-of-scope unit line. */
+function outOfScopeLines(units: readonly PaperSourceUnit[]): Set<string> {
+  const masked = new Set<string>()
+  for (const unit of units) {
+    if (isOutOfScopeUnit(unit)) {
+      for (const span of unit.spans) {
+        masked.add(`${span.readerPage}:${span.lineIndex}`)
+      }
+    }
+  }
+  return masked
+}
+
+/**
+ * Build the report-scoped page set from the application-validated source
+ * inventory. Bibliography/reference and standalone page-number lines are
+ * replaced with an out-of-scope placeholder so the report model never receives
+ * them as evidence, and any citation aimed at that content fails verbatim quote
+ * verification. Appendix content and formula/table originals remain citable
+ * (appendix holds methods and experiments; tables hold results). In-scope lines
+ * keep their exact text, spans, and line index so grounded citations remain
+ * byte-identical to the source.
+ */
+export function buildScopedReportPages(
+  pages: readonly ExtractedPaperPage[],
+  units: readonly PaperSourceUnit[],
+): readonly ExtractedPaperPage[] {
+  const masked = outOfScopeLines(units)
+  for (const line of sourceLines(pages)) {
+    if (line.exclusion?.reason === 'bibliography') masked.add(spanKey(line.span))
+  }
+  return pages.map((page) => {
+    const lines = page.lines.map((line, lineIndex) =>
+      masked.has(`${page.readerPage}:${lineIndex}`)
+        ? { text: OUT_OF_SCOPE_LINE, isHeading: false }
+        : line,
+    )
+    return {
+      ...page,
+      lines,
+      headings: lines.filter((line) => line.isHeading).map((line) => line.text),
+      text: lines.map((line) => line.text).join('\n'),
+    }
+  })
+}
 
 /**
  * Parse the untrusted raw Harness response and verify every finding against the
@@ -214,4 +279,54 @@ export function verifyPaperReview(
     missingScope: PAPER_REVIEW_MISSING_SCOPE,
   }
   return { success: true, report }
+}
+
+/**
+ * Merge per-page-chunk verified reports into one report of the same public
+ * shape. Findings are concatenated by section kind; a kind counts as covered
+ * when any chunk produced a grounded finding. Chunk-level gaps are retained and
+ * a missing-section gap is added only for a kind with no findings anywhere.
+ */
+export function mergePaperReviewReports(
+  partials: readonly PaperReviewReportResult[],
+): PaperReviewReportResult {
+  if (partials.length === 1 && partials[0]?.success) {
+    return partials[0]
+  }
+  const reports = partials.flatMap((partial) => (partial.success ? [partial.report] : []))
+  const sections: PaperReviewSection[] = []
+  const gaps: PaperReviewGap[] = []
+  for (const report of reports) {
+    for (const gap of report.gaps) {
+      gaps.push(gap)
+    }
+  }
+  for (const kind of PAPER_REVIEW_SECTION_KINDS) {
+    const findings = reports.flatMap((report) =>
+      report.sections.filter((section) => section.kind === kind).flatMap((section) => section.findings))
+    if (findings.length === 0) {
+      gaps.push({ section: SECTION_LABELS[kind], reason: GAP_REASON_NO_SECTION })
+      continue
+    }
+    const title = reports
+      .map((report) => report.sections.find((section) => section.kind === kind)?.title)
+      .find((candidate) => candidate !== undefined && candidate.trim() !== '')
+    sections.push({
+      kind,
+      title: title ?? SECTION_LABELS[kind],
+      findings,
+    })
+  }
+  const first = reports[0]
+  return {
+    success: true,
+    report: {
+      status: 'incomplete',
+      provider: first?.provider ?? '',
+      model: first?.model ?? '',
+      sections,
+      gaps,
+      missingScope: PAPER_REVIEW_MISSING_SCOPE,
+    },
+  }
 }

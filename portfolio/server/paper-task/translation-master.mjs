@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { translationBlockers } from './translation-eligibility.mjs'
 
 /**
  * Validation for the natural Chinese translation master (issue #46).
@@ -137,7 +138,6 @@ export function inspectTranslationMaster(args, context) {
   }
 
   verifyNumericPreservation(byId, segments, addIssue)
-  verifySourceFullness(byId, coveredIds, markdown, addIssue)
   const terminology = inspectTerminology(args.terminology, byId, markdown, addIssue)
   const assets = state.assets
     .filter((asset) => referencedAssetIds.has(asset.id))
@@ -151,6 +151,18 @@ export function inspectTranslationMaster(args, context) {
   const status = unresolved.length > 0 || state.status !== 'complete' || issues.length > 0 ? 'incomplete' : 'complete'
   if (status === 'incomplete' && !DISCLOSURE_CUE.test(markdown)) {
     addIssue('disclosure-missing', 'incomplete translation must disclose what needs confirmation in the reader text')
+  }
+  const issueMessages = {
+    'covered-and-unresolved': 'a source record cannot be both translated and unresolved',
+    'gap-translated': 'unrecoverable source records cannot be translated',
+    'ambiguous-translated': 'ambiguous or missing source records need an unresolved reason',
+    'disclosure-missing': 'incomplete translation must disclose what needs confirmation in the reader text',
+    'record-uncovered': 'present textual source records must be translated or declared unresolved',
+    'translation-no-prose': 'source prose must be represented by translated text, not only a disclosure',
+    'master-too-short': 'translation master is too short to represent its associated source prose',
+  }
+  for (const code of translationBlockers({ records, segments, unresolved, markdown, sourceStatus: state.status, issues })) {
+    if (!issues.some((issue) => issue.code === code)) addIssue(code, issueMessages[code])
   }
 
   return {
@@ -271,19 +283,6 @@ function numericSourceText(record) {
   if (record.kind === 'heading') return record.text.replace(/^\d+(?:\.\d+)*\.?\s+/u, '')
   if (record.kind === 'footnote') return record.text.replace(/^\d+\s+/u, '')
   return record.text
-}
-
-function verifySourceFullness(byId, coveredIds, markdown, addIssue) {
-  let sourceCharacters = 0
-  for (const recordId of coveredIds) {
-    const record = byId.get(recordId)?.record
-    if (record !== undefined && TEXT_KINDS.has(record.kind)) sourceCharacters += record.text.replace(/\s+/gu, '').length
-  }
-  if (sourceCharacters < 200) return
-  const masterCharacters = markdown.replace(/\s+/gu, '').length
-  if (masterCharacters < sourceCharacters * 0.25) {
-    addIssue('master-too-short', 'translation master is too short to cover the translated source text')
-  }
 }
 
 function includesNormalized(haystack, needle) {

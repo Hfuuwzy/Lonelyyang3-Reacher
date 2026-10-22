@@ -1,5 +1,13 @@
-import type { ExtractedPaperPage } from './pdf'
-import type { PaperReviewTaskGap } from '../../../app/utils/paper-review-task-contract'
+/**
+ * Layout geometry for the paper-review extractor (issue #27/#29).
+ *
+ * A `PaperTextRun` is the raw, page-labelled text-run geometry that the
+ * column-aware page reconstruction consumes. Indiscriminate raw-ordering and
+ * fixed-gap "layout ambiguity" warnings are intentionally removed here: the
+ * application reconstructs reading order from bounded column regions and
+ * full-width bands (see `pdf-page`), and any genuinely ambiguous region is
+ * locked to `unresolved` at the candidate layer rather than flagged page-wide.
+ */
 
 export interface PaperTextRun {
   readonly text: string
@@ -7,25 +15,8 @@ export interface PaperTextRun {
   readonly y: number
   readonly width: number
   readonly horizontal: boolean
-}
-
-export function layoutGaps(pages: readonly ExtractedPaperPage[]): readonly PaperReviewTaskGap[] {
-  return pages.flatMap(page => {
-    const runs = page.textRuns
-    let code = ''
-    if (page.text.trim() === '') code = 'empty-page'
-    else if (!runs || runs.length === 0) code = 'geometry-unavailable'
-    else if (runs.some((run, index) => {
-      if (!run.horizontal || ![run.x, run.y, run.width].every(Number.isFinite)) return true
-      const previous = runs[index - 1]
-      if (previous && run.y > previous.y + 2) return true
-      return runs.some(other => Math.abs(other.y - run.y) <= 2 && other.x - (run.x + run.width) > 48)
-    })) code = 'layout-ambiguity'
-    if (!code) return []
-    return [{ artifact: 'source' as const, code, origin: 'application' as const, unitIds: [],
-      readerPages: [page.readerPage],
-      spans: page.lines.map((line, lineIndex) => ({ readerPage: page.readerPage, lineIndex, start: 0, end: line.text.length })),
-      reason: `Source extraction requires inspection: ${code}. No OCR or reading-order repair was attempted.`,
-    }]
-  })
+  /** The source font identity, retained when pdfjs exposes it. */
+  readonly font?: string
+  /** The run's cap height in PDF units, retained when pdfjs exposes it. */
+  readonly height?: number
 }

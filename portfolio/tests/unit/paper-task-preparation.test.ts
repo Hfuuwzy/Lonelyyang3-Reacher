@@ -1,11 +1,12 @@
 /// <reference types="node" />
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createPaperTaskService } from '../../server/paper-task/coordinator'
 import type { PaperTaskSourceResult } from '../../app/utils/paper-task-source-contract'
 import type { PaperTaskRuntimeFactory } from '../../server/paper-task/runtime'
+import { writeTaskInput } from '../../server/paper-task/input'
 
 const TASK_ID = '123e4567-e89b-12d3-a456-426614174000'
 const PDF_BYTES = new Uint8Array([0x25, 0x50, 0x44, 0x46, 1])
@@ -54,6 +55,16 @@ function makeService() {
 }
 
 describe('paper-task source preparation storage', () => {
+  it('creates one immutable task instruction file for the selected generation attempt', () => {
+    const root = mkdtempSync(join(tmpdir(), 'paper-task-input-'))
+    roots.push(root)
+
+    const path = writeTaskInput(root, TASK_ID, 'deep-reading')
+    expect(path).toBe(join(root, 'task-input.md'))
+    expect(readFileSync(path, 'utf8').length).toBeGreaterThan(0)
+    expect(() => writeTaskInput(root, TASK_ID, 'deep-reading')).toThrow()
+  })
+
   it('submits a task and exposes ordered, revisioned prepared records without excerpt truncation', async () => {
     // Given: a typed preparation result with an unresolved page gap.
     const service = makeService()

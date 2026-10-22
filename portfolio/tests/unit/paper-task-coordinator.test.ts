@@ -1,10 +1,12 @@
 /// <reference types="node" />
 import { afterEach, describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto'
 import { preparedExtractionFixture } from '../fixtures/paper-task-source'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createPaperTaskService, type PaperTaskService } from '../../server/paper-task/coordinator'
+import { clearPaperTaskProviderSettings } from '../../server/paper-task/provider-settings'
 import type { PaperTaskRuntime, PaperTaskRuntimeFactory, PaperTaskRuntimeOptions } from '../../server/paper-task/runtime'
 import type { PaperTaskMultipartInput } from '../../server/paper-task/multipart'
 import type { PaperExtractionResult, ExtractedPaperPage } from '../../server/utils/paper-review/pdf'
@@ -151,6 +153,7 @@ function terminalOf(events: readonly PaperTaskEvent[]): PaperTaskEvent {
 }
 
 afterEach(() => {
+  clearPaperTaskProviderSettings()
   for (const root of roots) {
     rmSync(root, { recursive: true, force: true })
   }
@@ -158,6 +161,21 @@ afterEach(() => {
 })
 
 describe('paper-task coordinator submit', () => {
+  it('uses a distinct configuration-required response before creating a task', async () => {
+    clearPaperTaskProviderSettings()
+    const root = mkdtempSync(join(tmpdir(), 'paper-task-unconfigured-'))
+    roots.push(root)
+    const svc = createPaperTaskService({ projectRoot: root })
+
+    await expect(svc.submit(input('both'))).resolves.toMatchObject({
+      ok: false,
+      statusCode: 409,
+      message: expect.stringContaining('API 密钥'),
+    })
+    expect(existsSync(root)).toBe(true)
+    expect(existsSync(join(root, 'project-local'))).toBe(false)
+  })
+
   it('streams accepted, preparing, generating, preview, cleaning, and a succeeded terminal', async () => {
     const { factory } = fakeRuntimeFactory([
       { branch: 'translation', events: [{ type: 'progress', stage: 'generating', completed: 0, total: 1 }, { type: 'preview', paragraphs: ['样例译文段落。'] }], ok: true },
@@ -559,6 +577,83 @@ describe('paper-task independent branches and early return', () => {
       expect(handle.closeCalls).toBeGreaterThan(0)
     }
   })
+})
+
+describe('paper-task artifact retrieval after source correction', () => {
+  it('blocks final retrieval of an inspected PDF after its complete translation master becomes stale', async () => {
+    const master = '# 完整译文\n\n本文完整说明了研究问题、研究方法、实验结果、数据解释和研究结论。'
+    const originalPdf = new Uint8Array(Buffer.from('%PDF-1.4\noriginal fixture'))
+    const factory: PaperTaskRuntimeFactory = (options) => {
+      const directory = options.branchWorkspaceDir
+      if (directory === undefined) throw new Error('branch workspace unavailable')
+      writeFileSync(join(directory, 'master.md'), master)
+      writeFileSync(join(directory, 'translation.json'), JSON.stringify({
+        version: 1,
+        status: 'complete',
+        sourceRevision: 1,
+        masterSha256: createHash('sha256').update(master).digest('hex'),
+        segments: [{
+          index: 0,
+          markdown: master,
+          stale: false,
+          dependencies: [{ recordId: 'p1-r0', revision: 1 }, { recordId: 'p1-r1', revision: 1 }],
+        }],
+        assets: [],
+        unresolved: [],
+      }))
+      return {
+        events: async function* () {
+          yield {
+            type: 'generated-preview',
+            markdown: master,
+            paragraphs: [master],
+            quality: { status: 'complete', issues: [], options: [] },
+          }
+        },
+        result: Promise.resolve({ ok: true }),
+        close: async () => ({ ok: true }),
+      }
+    }
+    const svc = service({ factory })
+    const submission = await svc.submit({ pdf: originalPdf, selection: 'translation' })
+    if (!submission.ok) throw new Error('submit failed')
+    await collect(submission.events)
+
+    const built = await svc.buildArtifacts(TASK_ID, 'translation', ['pdf'])
+    const expectedPageCount = built?.documents[0]?.formats.pdf.expectedPageCount
+    if (expectedPageCount === undefined) throw new Error('expected PDF page count')
+    const artifactSha256 = built?.documents[0]?.formats.pdf.artifactSha256
+    if (artifactSha256 === undefined) throw new Error('expected PDF artifact hash')
+    const inspection = {
+      artifactSha256,
+      expectedPageCount,
+      pages: Array.from({ length: expectedPageCount }, (_, index) => ({
+        page: index + 1,
+        status: 'passed' as const,
+        expected: `Page ${index + 1} contains the complete translation.`,
+        observed: `Page ${index + 1} contains the complete translation.`,
+        evidence: `Inspected the actual rendered page ${index + 1}.`,
+      })),
+    }
+    const inspected = await svc.inspectArtifact(TASK_ID, 'translation', 'pdf', inspection)
+    expect(inspected?.documents[0]?.formats.pdf.finalAvailable).toBe(true)
+    expect(svc.artifact(TASK_ID, 'translation', 'pdf')).toBeDefined()
+
+    expect(svc.correctSource(TASK_ID, {
+      expectedSourceRevision: 1,
+      corrections: [{ recordId: 'p1-r1', expectedRecordRevision: 1, text: 'Corrected authored content line.' }],
+    })).toEqual({ kind: 'corrected', revision: 2 })
+
+    expect(svc.reader(TASK_ID)?.documents[0]?.formats.pdf).toMatchObject({
+      status: 'needs-confirmation',
+      build: 'built',
+      inspectionAvailable: true,
+      finalAvailable: false,
+    })
+    expect(svc.artifact(TASK_ID, 'translation', 'pdf')).toBeUndefined()
+    expect(svc.originalPdf(TASK_ID)).toEqual(originalPdf)
+    expect(svc.translatedPdf(TASK_ID)).toBeUndefined()
+  }, 15_000)
 })
 
 function waitForEvent(

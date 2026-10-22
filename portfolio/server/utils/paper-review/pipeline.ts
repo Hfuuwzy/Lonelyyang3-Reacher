@@ -1,89 +1,78 @@
-/**
- * Event pipeline for the paper-review prototype (issue #27).
- *
- * `createPaperReviewEvents` is the internal seam tested with fakes. It emits
- * the four stage events in protocol order and ends with exactly one terminal
- * event: the verifier's `report` on success or a single `error` at the failing
- * stage. No later stage is emitted after a failure. The extractor, runner, and
- * verifier are dependency-injected so unit tests can replace them; production
- * defaults are the real modules.
- */
-
-import type { PaperReviewStreamEvent } from '../../../app/utils/paper-review-contract'
-import {
-  extractPaperPages,
-  type ExtractedPaperPage,
-  type PaperExtractionResult,
-} from './pdf'
-import {
-  runPaperReview,
-  type PaperReviewHarnessResult,
-  type PaperReviewRunnerDependencies,
-  type PaperReviewRunInput,
-} from './harness'
-import {
-  verifyPaperReview,
-  type PaperReviewReportResult,
-} from './report'
+import type { PaperReviewFinding, PaperReviewGap, PaperReviewReport, PaperReviewSectionKind, PaperReviewStreamEvent } from '../../../app/utils/paper-review-contract'
+import { PAPER_REVIEW_SECTION_KINDS } from '../../../app/utils/paper-review-contract'
+import { extractPaperPages } from './pdf'
+import { runPaperReview } from './harness'
+import { buildScopedReportPages } from './report'
 import {
   parsePaperReviewMultipart,
   PAPER_PDF_BYTE_CAP,
   type PaperReviewMultipartPart,
 } from './multipart'
+import {
+  buildPaperReviewPrompt,
+  buildSourceInventoryPrompt,
+  buildSourceReviewPrompt,
+  buildTranslationPrompt,
+} from './prompt'
+import { validateInventoryBatch } from './source-inventory'
+import { validateTranslationBatch } from './translation'
+import { freezePaperTranslation, validateSourceReviewBatch } from './source-review'
+import { buildSourceCandidates } from './source-candidate'
+import { sourceDigest, unitGap } from './source-ledger'
+import { collectStructuralHeadings } from './source-matching'
+import {
+  EXTRACTION_MESSAGES,
+  cancelled,
+  isAborted,
+  makeTaskResult,
+  safeMessage,
+} from '../../paper-review-internal/pipeline-outcomes'
+import { runBoundedShards } from '../../paper-review-internal/bounded-prompts'
+import { kindCounts, parseEvidenceNotes, synthesizeReport } from '../../paper-review-internal/report-notes'
+import { partitionIds, partitionPagesByText } from '../../paper-review-internal/batching'
+import { isTranslationEligible } from '../../../app/utils/paper-review-task-contract'
+import type { PaperSourceReview, PaperReviewTaskGap, PaperSourceUnit, PaperTranslationPair } from '../../../app/utils/paper-review-task-contract'
+import type {
+  PaperReviewPipelineDependencies,
+  PaperReviewLifecycleOptions,
+} from '../../paper-review-internal/pipeline-types'
+export type {
+  PaperReviewPipelineDependencies,
+  PaperReviewLifecycleOptions,
+} from '../../paper-review-internal/pipeline-types'
 
-export interface PaperReviewPipelineDependencies {
-  readonly extractPaperPages?: (bytes: Uint8Array) => Promise<PaperExtractionResult>
-  readonly runPaperReview?: (
-    input: PaperReviewRunInput,
-    pages: readonly ExtractedPaperPage[],
-    deps?: PaperReviewRunnerDependencies,
-  ) => Promise<PaperReviewHarnessResult>
-  readonly verifyPaperReview?: (
-    raw: string,
-    pages: readonly ExtractedPaperPage[],
-    provider: string,
-    model: string,
-  ) => PaperReviewReportResult
+function sourceOrder(units: readonly PaperSourceUnit[]): readonly PaperSourceUnit[] {
+  return [...units].sort((a, b) => {
+    const left = a.spans[0]
+    const right = b.spans[0]
+    return left && right ? left.readerPage - right.readerPage || left.lineIndex - right.lineIndex || left.start - right.start : 0
+  })
 }
 
-const EXTRACTION_MESSAGES: Record<string, string> = {
-  'empty-input': 'PDF 文件为空，请重新上传。',
-  'invalid-pdf': '上传的文件不是可读取的 PDF，请检查后重新上传。',
-  encrypted: 'PDF 已加密，请提供未加密的 PDF。',
-  'no-text': 'PDF 没有可提取的文本，可能是扫描件或图片，本次无法审阅。',
-  'read-failed': 'PDF 文本提取过程中发生错误，请重新上传。',
+function reviewRunFailedGaps(units: readonly PaperSourceUnit[], reason: string): readonly PaperReviewTaskGap[] {
+  if (units.length === 0) {
+    return [{ artifact: 'source-review', code: 'review-run-failed', origin: 'application', unitIds: [], readerPages: [], spans: [], reason }]
+  }
+  return units.map((unit) => ({ ...unitGap(unit, 'source-review', 'review-run-failed'), reason }))
 }
 
-const HARNESS_MESSAGES: Record<string, string> = {
-  'invalid-input': '审阅参数无效，请检查后重新提交。',
-  'cli-not-found': '本地的 Harness CLI 未就绪，请重新安装依赖或恢复源码后再试。',
-  'version-mismatch': '本地的 Harness CLI 版本与应用 SDK 不一致，请重新构建后重试。',
-  'cli-not-built': '本地的 Harness CLI 尚未构建，请先构建后再试。',
-  'run-failed': '模型服务暂不可用，请稍后重试。',
-  'cleanup-failed': '审阅进程清理失败，临时环境可能残留，请稍后重试。',
-}
-
-const VERIFY_MESSAGES: Record<string, string> = {
-  'malformed-json': '模型返回的内容不是有效 JSON，本次审阅结果不可用。',
-  'malformed-report': '模型返回的内容不符合审阅报告格式，本次审阅结果不可用。',
-}
-
-function safeMessage(map: Record<string, string>, code: string, fallback: string): string {
-  return map[code] ?? fallback
-}
-
-/**
- * Yield the full paper-review stream. Stage events are emitted just before each
- * dependency runs; the first failure stops the stream with one error event.
- */
 export async function* createPaperReviewEvents(
   parts: readonly PaperReviewMultipartPart[],
   dependencies: PaperReviewPipelineDependencies = {},
+  options: PaperReviewLifecycleOptions = {},
 ): AsyncGenerator<PaperReviewStreamEvent> {
   const extract = dependencies.extractPaperPages ?? extractPaperPages
   const run = dependencies.runPaperReview ?? runPaperReview
-  const verify = dependencies.verifyPaperReview ?? verifyPaperReview
+  const validateInventory = dependencies.validateInventoryBatch ?? validateInventoryBatch
+  const validateTranslation = dependencies.validateTranslationBatch ?? validateTranslationBatch
+  const freeze = dependencies.freezePaperTranslation ?? freezePaperTranslation
+  const validateReview = dependencies.validateSourceReviewBatch ?? validateSourceReviewBatch
+  const signal = options.signal
 
+  if (isAborted(signal)) {
+    yield cancelled('validating')
+    return
+  }
   yield { type: 'stage', stage: 'validating' }
 
   const parsed = parsePaperReviewMultipart(parts, PAPER_PDF_BYTE_CAP)
@@ -93,8 +82,16 @@ export async function* createPaperReviewEvents(
   }
   const input = parsed.input
 
+  if (isAborted(signal)) {
+    yield cancelled('extracting')
+    return
+  }
   yield { type: 'stage', stage: 'extracting' }
-  const extraction = await extract(input.pdf)
+  const extraction = await extract(input.pdf, signal)
+  if (isAborted(signal)) {
+    yield cancelled('extracting')
+    return
+  }
   if (!extraction.success) {
     yield {
       type: 'error',
@@ -104,30 +101,230 @@ export async function* createPaperReviewEvents(
     }
     return
   }
+  const pages = extraction.pages
 
+  if (isAborted(signal)) {
+    yield cancelled('inventorying')
+    return
+  }
+  yield { type: 'stage', stage: 'inventorying' }
+  const candidates = buildSourceCandidates(pages)
+  const candidateBatches = partitionIds(candidates.map((candidate) => ({ id: candidate.id, text: candidate.text })))
+  const inventoryShard = await runBoundedShards(
+    run,
+    { input, signal, stage: 'inventorying', purpose: 'inventory' },
+    candidateBatches.map((batch) => buildSourceInventoryPrompt(pages, batch)),
+  )
+  if (inventoryShard.kind === 'fatal') {
+    yield inventoryShard.error
+    return
+  }
+  const inventoryUnits: PaperSourceUnit[] = []
+  const sourceGaps: PaperReviewTaskGap[] = []
+  for (let index = 0; index < candidateBatches.length; index += 1) {
+    const batchIds = candidateBatches[index]!
+    const slot = inventoryShard.slots[index]!
+    const outcome = validateInventory(pages, batchIds, slot.kind === 'ok' ? slot.text : '[]')
+    inventoryUnits.push(...outcome.units)
+    sourceGaps.push(...outcome.gaps)
+    if (slot.kind === 'run-failed') {
+      sourceGaps.push({
+        artifact: 'source', code: 'inventory-run-failed', origin: 'application', unitIds: [], readerPages: [], spans: [],
+        reason: 'The inventory model call failed for a source batch; its prose stays translation-eligible but classification is incomplete.',
+      })
+    } else if (slot.kind === 'oversize') {
+      sourceGaps.push({
+        artifact: 'source', code: 'inventory-oversize', origin: 'application', unitIds: [], readerPages: [], spans: [],
+        reason: 'A source batch exceeds the classification prompt budget; it was not truncated or blindly sent, and its prose stays translation-eligible.',
+      })
+    }
+  }
+  const source = { sourceId: sourceDigest(pages), pageCount: pages.length, units: sourceOrder(inventoryUnits) }
+
+  if (isAborted(signal)) {
+    yield cancelled('analyzing')
+    return
+  }
   yield { type: 'stage', stage: 'analyzing' }
-  const runResult = await run(input, extraction.pages)
-  if (!runResult.success) {
+  // The report model only ever sees in-scope evidence: bibliography/reference and
+  // page-number lines are masked out, while appendix, formula, and table content
+  // stay citable. Each chunk renders a bounded slice but carries the full scoped
+  // document for global heading inheritance, and every finding is verified
+  // against the global scoped source + global headings — not just the chunk. A
+  // chunk produces partial section notes for only the kinds it supports; the
+  // five-kind coverage is enforced only on the final synthesized report. A
+  // non-fatal batch failure localizes and translation/review still proceed.
+  const scopedReportPages = buildScopedReportPages(pages, source.units)
+  const reportChunks = pages.length === 0 ? [[]] : partitionPagesByText(scopedReportPages)
+  const reportContext = {
+    pages: scopedReportPages,
+    pageCount: Math.max(0, ...scopedReportPages.map((page) => page.readerPage)),
+    headings: collectStructuralHeadings(scopedReportPages),
+  }
+  const reportShard = await runBoundedShards(
+    run,
+    { input, signal, stage: 'analyzing', purpose: 'report' },
+    reportChunks.map((chunk) =>
+      buildPaperReviewPrompt({ providerLabel: input.providerLabel, model: input.model, pages: chunk, allPages: scopedReportPages })),
+  )
+  if (reportShard.kind === 'fatal') {
+    yield reportShard.error
+    return
+  }
+  const findingsByKind = new Map<PaperReviewSectionKind, PaperReviewFinding[]>()
+  const titles = new Map<PaperReviewSectionKind, string>()
+  const droppedByKind = kindCounts()
+  const unlocatedByKind = kindCounts()
+  let partialBatches = 0
+  const generationGaps: PaperReviewGap[] = []
+  for (let index = 0; index < reportChunks.length; index += 1) {
+    const slot = reportShard.slots[index]!
+    if (slot.kind !== 'ok') {
+      partialBatches += 1
+      continue
+    }
+    const parsed = parseEvidenceNotes(slot.text, reportContext)
+    if (parsed.kind === 'unusable') {
+      partialBatches += 1
+      continue
+    }
+    const notes = parsed.notes
+    generationGaps.push(...notes.gaps)
+    for (const [kind, findings] of notes.findingsByKind) {
+      findingsByKind.set(kind, [...(findingsByKind.get(kind) ?? []), ...findings])
+    }
+    for (const kind of PAPER_REVIEW_SECTION_KINDS) {
+      const noteTitle = notes.titles.get(kind)
+      if (noteTitle !== undefined) {
+        titles.set(kind, noteTitle)
+      }
+      droppedByKind[kind] += notes.droppedByKind[kind]
+      unlocatedByKind[kind] += notes.unlocatedByKind[kind]
+    }
+  }
+  const emptyReaderPages = scopedReportPages.filter((page) => page.text.trim() === '').map((page) => page.readerPage)
+  const report: PaperReviewReport | null = reportChunks.length === 0
+    ? null
+    : synthesizeReport({
+        provider: input.providerLabel,
+        model: input.model,
+        findingsByKind,
+        titles,
+        droppedByKind,
+        unlocatedByKind,
+        emptyReaderPages,
+        partialBatches,
+        generationGaps,
+      })
+
+  if (isAborted(signal)) {
+    yield cancelled('translating')
+    return
+  }
+  yield { type: 'stage', stage: 'translating' }
+  const eligibleUnits = source.units.filter(isTranslationEligible)
+  const translationBatches = partitionIds(eligibleUnits.map((unit) => ({ id: unit.id, text: unit.original })))
+  const translationShard = await runBoundedShards(
+    run,
+    { input, signal, stage: 'translating', purpose: 'translation' },
+    translationBatches.map((batch) => buildTranslationPrompt(source, batch)),
+  )
+  if (translationShard.kind === 'fatal') {
+    yield translationShard.error
+    return
+  }
+  const pairs: PaperTranslationPair[] = []
+  const translationGaps: PaperReviewTaskGap[] = []
+  for (let index = 0; index < translationBatches.length; index += 1) {
+    const batchIds = translationBatches[index]!
+    const slot = translationShard.slots[index]!
+    if (slot.kind !== 'ok') {
+      const code = slot.kind === 'oversize' ? 'oversize-prompt' : 'translation-run-failed'
+      const reason = slot.kind === 'oversize'
+        ? '该批原文体积超过单次可处理上限，未盲目发送或截断，本次未生成译文。'
+        : '本次无法生成该单元的译文。'
+      for (const unitId of batchIds) {
+        const unit = source.units.find((candidate) => candidate.id === unitId)
+        pairs.push({ unitId, chinese: null })
+        if (unit !== undefined) {
+          translationGaps.push({ ...unitGap(unit, 'translation', code), reason })
+        }
+      }
+      continue
+    }
+    const result = validateTranslation(source, batchIds, slot.text)
+    pairs.push(...result.pairs)
+    translationGaps.push(...result.gaps)
+  }
+  const pairById = new Map(pairs.map((pair) => [pair.unitId, pair]))
+  const orderedPairs = source.units.filter(isTranslationEligible).map((unit) => pairById.get(unit.id) ?? { unitId: unit.id, chinese: null })
+  const translationFailedAll = translationBatches.length > 0 && translationBatches.every((_, index) => translationShard.slots[index]?.kind !== 'ok')
+
+  const frozen = freeze(source, orderedPairs)
+  if (translationFailedAll) {
     yield {
-      type: 'error',
-      stage: 'analyzing',
-      code: runResult.error.code,
-      message: safeMessage(HARNESS_MESSAGES, runResult.error.code, '审阅运行失败，请重新提交。'),
+      type: 'result',
+      result: makeTaskResult({
+        input, source, report, pairs: orderedPairs,
+        review: { reviewOf: frozen.reviewOf, status: 'not-run', checks: [] },
+        gaps: [...sourceGaps, ...translationGaps, ...reviewRunFailedGaps(source.units, '译文未生成，本次未进行原文对照复检。')],
+      }),
     }
     return
   }
 
+  if (isAborted(signal)) {
+    yield cancelled('verifying')
+    return
+  }
   yield { type: 'stage', stage: 'verifying' }
-  const verifyResult = verify(runResult.finalResponse, extraction.pages, input.providerLabel, input.model)
-  if (!verifyResult.success) {
-    yield {
-      type: 'error',
-      stage: 'verifying',
-      code: verifyResult.error.code,
-      message: safeMessage(VERIFY_MESSAGES, verifyResult.error.code, '审阅结果验证失败，请重新提交。'),
-    }
+  const reviewBatches = partitionIds(source.units.map((unit) => ({ id: unit.id, text: unit.original })))
+  const reviewShard = await runBoundedShards(
+    run,
+    { input, signal, stage: 'verifying', purpose: 'source-review' },
+    reviewBatches.map((batch) => buildSourceReviewPrompt(frozen, batch)),
+  )
+  if (reviewShard.kind === 'fatal') {
+    yield reviewShard.error
     return
   }
+  const checks: { unitId: string; verdict: 'passed' | 'issues' }[] = []
+  const reviewGaps: PaperReviewTaskGap[] = []
+  for (let index = 0; index < reviewBatches.length; index += 1) {
+    const batchIds = reviewBatches[index]!
+    const slot = reviewShard.slots[index]!
+    if (slot.kind !== 'ok') {
+      const code = slot.kind === 'oversize' ? 'oversize-prompt' : 'review-run-failed'
+      const reason = slot.kind === 'oversize'
+        ? '该批原文对照材料体积超过单次可处理上限，未盲目发送或截断，本次未完成复检。'
+        : '本次未能完成该单元的原文对照复检。'
+      for (const unitId of batchIds) {
+        checks.push({ unitId, verdict: 'issues' })
+        const unit = source.units.find((candidate) => candidate.id === unitId)
+        if (unit !== undefined) {
+          reviewGaps.push({ ...unitGap(unit, 'source-review', code), reason })
+        }
+      }
+      continue
+    }
+    const result = validateReview(frozen, batchIds, slot.text)
+    checks.push(...result.review.checks)
+    reviewGaps.push(...result.gaps)
+  }
+  const checkByUnit = new Map(checks.map((check) => [check.unitId, check.verdict]))
+  const mergedChecks = source.units.map((unit) => ({ unitId: unit.id, verdict: checkByUnit.get(unit.id) ?? 'issues' }))
+  const anyIssue = reviewGaps.length > 0 || reviewBatches.length === 0 || mergedChecks.some((check) => check.verdict !== 'passed')
+  const review: PaperSourceReview = {
+    reviewOf: frozen.reviewOf,
+    status: anyIssue ? 'incomplete' : 'passed',
+    checks: mergedChecks,
+  }
 
-  yield { type: 'report', report: verifyResult.report }
+  yield {
+    type: 'result',
+    result: makeTaskResult({
+      input, source, report, pairs: orderedPairs, review,
+      gaps: [...sourceGaps, ...translationGaps, ...reviewGaps],
+    }),
+  }
 }

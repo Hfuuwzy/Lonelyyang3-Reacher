@@ -3,12 +3,16 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import type { DeepSeekHarnessOptions } from '@deepseek-ai/dsh-sdk-client'
+import { MessageId } from '@deepseek-ai/dsh-llm'
+import { SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ExtractedPaperPage } from '../../server/utils/paper-review/pdf'
 import {
   buildChildEnv,
   buildOverlayPatch,
   runPaperReview,
+  RUN_FAILED_MESSAGE,
   type HarnessFactory,
+  type PaperReviewModelRequest,
   type PaperReviewRunInput,
 } from '../../server/utils/paper-review/harness'
 import { resolveLocalDshBin, type DshBinResolver } from '../../server/utils/paper-review/dsh-bin-resolver'
@@ -66,13 +70,23 @@ function capturingFactory(record: LaunchRecord): HarnessFactory {
       async run(input) {
         record.attempts += 1
         record.runs.push(input)
-        return { sessionId: `sess-${record.launches.length}`, finalResponse: '{ "sections": [] }' }
+        return { sessionId: `sess-${record.launches.length}`, finalResponse: '{ "sections": [] }', events: [] }
       },
       async close() {
         record.closes += 1
       },
     }
   }
+}
+
+/** A fake factory returning fixed SDK result events regardless of the prompt. */
+function eventFactory(events: readonly SessionEvent[]): HarnessFactory {
+  return () => ({
+    async run() {
+      return { sessionId: 'sess-1', finalResponse: '{ "sections": [] }', events: [...events] }
+    },
+    async close() {},
+  })
 }
 
 /** Absolute built bin the fake runner tests hand back through a stub resolver. */
@@ -230,7 +244,12 @@ describe('runPaperReview prompt', () => {
     // Given a fake capturing the prompt text.
     const record = newRecord()
     // When the runner runs the prompt.
-    await runPaperReview(KNOWN_INPUT, PAGES, { harnessFactory: capturingFactory(record), resolveLocalDshBin: okResolver(FAKE_LOCAL_BIN) })
+    const expectedPrompt = buildPaperReviewPrompt({ providerLabel: KNOWN_INPUT.providerLabel, model: KNOWN_INPUT.model, pages: PAGES })
+    await runPaperReview(
+      KNOWN_INPUT,
+      { purpose: 'report', prompt: expectedPrompt },
+      { harnessFactory: capturingFactory(record), resolveLocalDshBin: okResolver(FAKE_LOCAL_BIN) },
+    )
 
     // Then the single prompt carries page-labelled text, headings, and the
     // structural source/data fields, and never contains the API key.
@@ -319,7 +338,7 @@ describe('runPaperReview success and failure lifecycle', () => {
       return {
         async run() {
           record.attempts += 1
-          return { sessionId: 'sess-1', finalResponse: '{ "sections": [] }' }
+          return { sessionId: 'sess-1', finalResponse: '{ "sections": [] }', events: [] }
         },
         async close() {
           record.closes += 1
@@ -377,6 +396,60 @@ describe('runPaperReview success and failure lifecycle', () => {
     expect(result.error.message).not.toContain(closeError.message)
     expect(record.closes).toBe(1)
     expect(existsSync(record.launches[0]!.dshHome!)).toBe(false)
+  })
+
+  it('resolves to a typed key-free cleanup-failed result when temp-root removal throws', async () => {
+    // Given a run that succeeds but whose temp-root removal throws a key-bearing error.
+    const record = newRecord()
+    const SENTINEL = 'removal|sentinel'
+    const removalError = new Error(`temp-root removal exploded: ${SENTINEL} near ${KEY}`)
+    const factory: HarnessFactory = (options) => {
+      record.launches.push(options)
+      return {
+        async run() {
+          record.attempts += 1
+          return { sessionId: 'sess-1', finalResponse: '{ "sections": [] }', events: [] }
+        },
+        async close() {
+          record.closes += 1
+        },
+      }
+    }
+
+    // A real fixture the runner is told to clean; the test removes it in a
+    // finally even if the runner itself rejects during a red run.
+    const fixture = mkdtempSync(join(tmpdir(), 'paper-review-removal-fixture-'))
+    const removedRoots: string[] = []
+    try {
+      // When the run completes and cleanup's temp-root removal rejects.
+      const result = await runPaperReview(KNOWN_INPUT, PAGES, {
+        harnessFactory: factory,
+        resolveLocalDshBin: okResolver(FAKE_LOCAL_BIN),
+        createTempRoot: () => fixture,
+        removeTempRoot: (root) => {
+          removedRoots.push(root)
+          throw removalError
+        },
+      })
+
+      // Then it resolves as a typed cleanup-failed failure rather than throwing,
+      // never leaking the key or the raw removal detail, closing once, and
+      // attempting the removal exactly once.
+      expect(result.success).toBe(false)
+      if (result.success) {
+        return
+      }
+      expect(result.error.code).toBe('cleanup-failed')
+      expect(result.error.recoverable).toBe(true)
+      expect(result.error.message).not.toContain(KEY)
+      expect(result.error.message).not.toContain(SENTINEL)
+      expect(result.error.message).not.toContain(removalError.message)
+      expect(record.closes).toBe(1)
+      expect(removedRoots).toHaveLength(1)
+      expect(removedRoots[0]).toBe(fixture)
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
   })
 
   it('mints a fresh unique temp home per invocation and removes every home', async () => {
@@ -482,6 +555,289 @@ describe('runPaperReview success and failure lifecycle', () => {
     expect(patch).toContain('https://anthropic-gateway.example')
     expect(patch).toContain('claude-5-mini')
     expect(patch).not.toContain(KEY)
+  })
+})
+
+describe('runPaperReview cancellation (issue #28)', () => {
+  const REQUEST: PaperReviewModelRequest = { purpose: 'report', prompt: 'controlled report prompt' }
+
+  it('returns an identifiable cancelled result for a pre-aborted signal without launching or creating resources', async () => {
+    // Given an already-aborted signal and spies on the resource seams.
+    const controller = new AbortController()
+    controller.abort()
+    const record = newRecord()
+    let tempRootCalls = 0
+    // When invoked with the pre-aborted signal.
+    const result = await runPaperReview(
+      KNOWN_INPUT,
+      REQUEST,
+      {
+        harnessFactory: capturingFactory(record),
+        resolveLocalDshBin: okResolver(FAKE_LOCAL_BIN),
+        createTempRoot: () => {
+          tempRootCalls += 1
+          return join(tmpdir(), 'paper-review-abort-should-not-run')
+        },
+      },
+      { signal: controller.signal },
+    )
+
+    // Then it is a terminal cancelled result and no harness or temp home was created.
+    expect(result.success).toBe(false)
+    if (result.success) {
+      return
+    }
+    expect(result.error.code).toBe('cancelled')
+    expect(result.error.message.length).toBeGreaterThan(0)
+    expect(record.launches).toHaveLength(0)
+    expect(tempRootCalls).toBe(0)
+  })
+
+  it('aborting mid-run closes only that invocation, removes the home, and returns cancelled', async () => {
+    // Given a harness whose run hangs until close reaps the child.
+    const record = newRecord()
+    const controller = new AbortController()
+    let rejectRun!: (error: Error) => void
+    const factory: HarnessFactory = (options) => {
+      record.launches.push(options)
+      const runPromise = new Promise<{ sessionId: string; finalResponse: string; events: never[] }>((_resolve, reject) => {
+        rejectRun = reject
+      })
+      return {
+        async run() {
+          record.attempts += 1
+          return runPromise
+        },
+        async close() {
+          record.closes += 1
+          rejectRun(new Error('child reaped by abort'))
+        },
+      }
+    }
+
+    // When the run is started then aborted mid-flight.
+    const pending = runPaperReview(
+      KNOWN_INPUT,
+      REQUEST,
+      { harnessFactory: factory, resolveLocalDshBin: okResolver(FAKE_LOCAL_BIN) },
+      { signal: controller.signal },
+    )
+    controller.abort()
+    const result = await pending
+
+    // Then the outcome is a terminal cancelled result, the single run attempt was
+    // not retried, the harness closed exactly once, and the home was removed.
+    expect(result.success).toBe(false)
+    if (result.success) {
+      return
+    }
+    expect(result.error.code).toBe('cancelled')
+    expect(record.attempts).toBe(1)
+    expect(record.closes).toBe(1)
+    expect(existsSync(record.launches[0]!.dshHome!)).toBe(false)
+  })
+
+  it('does not let a successful run output escape once abort fires during cleanup', async () => {
+    // Given a run that succeeds but whose close() triggers the abort signal.
+    const record = newRecord()
+    const controller = new AbortController()
+    const factory: HarnessFactory = (options) => {
+      record.launches.push(options)
+      return {
+        async run() {
+          record.attempts += 1
+          return { sessionId: 'sess-1', finalResponse: '{ "sections": [] }', events: [] }
+        },
+        async close() {
+          record.closes += 1
+          controller.abort()
+        },
+      }
+    }
+
+    // When the run resolves and abort fires during the close/teardown phase.
+    const result = await runPaperReview(
+      KNOWN_INPUT,
+      REQUEST,
+      { harnessFactory: factory, resolveLocalDshBin: okResolver(FAKE_LOCAL_BIN) },
+      { signal: controller.signal },
+    )
+
+    // Then no success escapes: the terminal outcome is cancelled, close ran once,
+    // and the temp home was removed.
+    expect(result.success).toBe(false)
+    if (result.success) {
+      return
+    }
+    expect(result.error.code).toBe('cancelled')
+    expect(record.closes).toBe(1)
+    expect(existsSync(record.launches[0]!.dshHome!)).toBe(false)
+  })
+
+  it('a later invocation with its own signal gets a distinct home and no prior session id', async () => {
+    // Given two sequential invocations each carrying its own signal.
+    const record = newRecord()
+    const factory = capturingFactory(record)
+    const firstSignal = new AbortController().signal
+    const secondSignal = new AbortController().signal
+    // When both complete.
+    const first = await runPaperReview(KNOWN_INPUT, REQUEST, { harnessFactory: factory, resolveLocalDshBin: okResolver(FAKE_LOCAL_BIN) }, { signal: firstSignal })
+    const second = await runPaperReview(KNOWN_INPUT, REQUEST, { harnessFactory: factory, resolveLocalDshBin: okResolver(FAKE_LOCAL_BIN) }, { signal: secondSignal })
+
+    // Then each launch got a distinct home, both were removed, and each run used
+    // its own invocation with no prior session id threaded through.
+    expect(first.success).toBe(true)
+    expect(second.success).toBe(true)
+    const homeOne = record.launches[0]!.dshHome!
+    const homeTwo = record.launches[1]!.dshHome!
+    expect(homeOne).not.toBe(homeTwo)
+    expect(existsSync(homeOne)).toBe(false)
+    expect(existsSync(homeTwo)).toBe(false)
+    expect(record.attempts).toBe(2)
+    expect(record.closes).toBe(2)
+  })
+})
+
+describe('runPaperReview rejects structural SDK failures from collected events', () => {
+  it('rejects a turn/end error even when finalResponse looks valid, without leaking the key', async () => {
+    // Given a run whose session ends with a turn/end error carrying the key.
+    const events: SessionEvent[] = [
+      {
+        type: 'turn/end',
+        seq: SessionSeq(1),
+        time: 1,
+        data: { turn: 1, reason: { kind: 'error', error: { code: 'AUTH', message: `provider refused near ${KEY}` } } },
+      },
+    ]
+
+    // When the run resolves with only a structural failure in its events.
+    const result = await runPaperReview(KNOWN_INPUT, PAGES, {
+      harnessFactory: eventFactory(events),
+      resolveLocalDshBin: okResolver(FAKE_LOCAL_BIN),
+    })
+
+    // Then a fixed, key-free run-failed failure is returned, never the raw event.
+    expect(result.success).toBe(false)
+    if (result.success) {
+      return
+    }
+    expect(result.error.code).toBe('run-failed')
+    expect(result.error.recoverable).toBe(true)
+    expect(result.error.message).toBe(RUN_FAILED_MESSAGE)
+    expect(result.error.message).not.toContain(KEY)
+  })
+
+  it('rejects an assistant/attempt stream whose terminal finish reports an error', async () => {
+    // Given an assistant attempt whose embedded stream ends in an error finish.
+    const events: SessionEvent[] = [
+      {
+        type: 'assistant/attempt',
+        seq: SessionSeq(1),
+        time: 1,
+        data: {
+          turn: 1,
+          step: 1,
+          stream: [{ type: 'chunk', time: 1, chunk: { type: 'finish', reason: { kind: 'error', failure: { code: 'RATE_LIMIT', message: `quota reached near ${KEY}` } } } }],
+        },
+      },
+    ]
+
+    // When the run resolves despite the failed embedded attempt.
+    const result = await runPaperReview(KNOWN_INPUT, PAGES, {
+      harnessFactory: eventFactory(events),
+      resolveLocalDshBin: okResolver(FAKE_LOCAL_BIN),
+    })
+
+    // Then a fixed run-failed failure is returned without the event detail.
+    expect(result.success).toBe(false)
+    if (result.success) {
+      return
+    }
+    expect(result.error.code).toBe('run-failed')
+    expect(result.error.message).not.toContain(KEY)
+    expect(result.error.message).not.toContain('RATE_LIMIT')
+  })
+
+  it('rejects an assistant/message stream whose terminal finish reports an aborted reason', async () => {
+    // Given an assistant message whose embedded stream ends in an aborted finish.
+    const events: SessionEvent[] = [
+      {
+        type: 'assistant/message',
+        seq: SessionSeq(1),
+        time: 1,
+        data: {
+          turn: 1,
+          step: 1,
+          message: { id: MessageId('m1'), role: 'assistant', content: [], source: { kind: 'model', provider: 'gateway', model: 'reviewer-max' } },
+          stream: [{ type: 'chunk', time: 1, chunk: { type: 'finish', reason: { kind: 'aborted', failure: { code: 'CANCELLED', message: 'cancelled by user' } } } }],
+        },
+      },
+    ]
+
+    // When the run resolves despite the aborted assistant stream.
+    const result = await runPaperReview(KNOWN_INPUT, PAGES, {
+      harnessFactory: eventFactory(events),
+      resolveLocalDshBin: okResolver(FAKE_LOCAL_BIN),
+    })
+
+    // Then a fixed run-failed failure is returned.
+    expect(result.success).toBe(false)
+    if (result.success) {
+      return
+    }
+    expect(result.error.code).toBe('run-failed')
+  })
+
+  it('still removes the temp home and closes once when events mark a structural failure', async () => {
+    // Given a run that resolves but whose events mark a turn/end error.
+    const record = newRecord()
+    const factory: HarnessFactory = (options) => {
+      record.launches.push(options)
+      return {
+        async run() {
+          record.attempts += 1
+          return {
+            sessionId: 'sess-1',
+            finalResponse: '{ "sections": [] }',
+            events: [
+              { type: 'turn/end', seq: SessionSeq(1), time: 1, data: { turn: 1, reason: { kind: 'error', error: { code: 'AUTH', message: 'oops' } } } },
+            ],
+          }
+        },
+        async close() {
+          record.closes += 1
+        },
+      }
+    }
+
+    // When the structural failure is detected.
+    const result = await runPaperReview(KNOWN_INPUT, PAGES, { harnessFactory: factory, resolveLocalDshBin: okResolver(FAKE_LOCAL_BIN) })
+
+    // Then the home is still removed and the harness closed exactly once.
+    expect(result.success).toBe(false)
+    expect(record.attempts).toBe(1)
+    expect(record.closes).toBe(1)
+    expect(existsSync(record.launches[0]!.dshHome!)).toBe(false)
+  })
+
+  it('accepts a genuinely successful run with a completed turn and a stop finish', async () => {
+    // Given events reflecting a completed, non-failing turn.
+    const events: SessionEvent[] = [
+      { type: 'turn/end', seq: SessionSeq(1), time: 1, data: { turn: 1, reason: { kind: 'completed' } } },
+    ]
+
+    // When the run resolves with those events.
+    const result = await runPaperReview(KNOWN_INPUT, PAGES, {
+      harnessFactory: eventFactory(events),
+      resolveLocalDshBin: okResolver(FAKE_LOCAL_BIN),
+    })
+
+    // Then the raw finalResponse is returned as a genuine success.
+    expect(result.success).toBe(true)
+    if (!result.success) {
+      return
+    }
+    expect(result.finalResponse).toBe('{ "sections": [] }')
   })
 })
 

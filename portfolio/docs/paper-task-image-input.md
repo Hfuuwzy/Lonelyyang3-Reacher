@@ -12,7 +12,7 @@ The input and receipts retain `understanding: unverified` semantics. A path, ava
 
 The application policy currently caps each image at 1,500,000 pixels, 8,192 pixels on either side, and 8 MiB of PNG bytes. A branch may include at most four images, with aggregate limits of 16 MiB raw image bytes and 22 MiB base64 image bytes. The complete serialized request is capped at 24 MiB, including tools, history, and JSON structure. Context is capped at 20,000 UTF-8 bytes per image.
 
-These are application bounds, not supplier limits or SDK guarantees. The guard checks actual native protocol image blocks, decodes their PNG dimensions and pixels, and matches them to admitted source crops and context. It does not treat a path or remote image URL as image content. Lossless PNG re-encoding may be acceptable if decoded pixels and dimensions still match; resizing, lossy conversion, and redraws are blocked as changed image content.
+These are application bounds, not supplier limits or SDK guarantees. The guard checks actual native protocol image blocks, decodes their PNG dimensions and pixels, and matches them to admitted source crops and context. It does not treat a path or remote image URL as image content. Lossless PNG re-encoding may be acceptable if decoded pixels and dimensions still match; resizing, lossy conversion, and redraws are blocked as changed image content. The first request carries every prepared crop; later requests may omit images dropped by history compaction, while any image block that remains must still match an approved crop and context.
 
 ## Receipts and lifecycle
 

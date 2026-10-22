@@ -8,6 +8,7 @@ import {
 } from '../../app/utils/paper-task-reading-contract'
 import type { StoredSource } from './source-store'
 import { workspacePaths } from './workspace'
+import { documentAssets, readDocumentArtifact } from './document-artifact.mjs'
 
 const VISUAL_KINDS = new Set(['figure', 'table', 'formula', 'algorithm'])
 
@@ -29,6 +30,15 @@ export function readPaperTaskReading(
   root: string,
   stored: StoredSource,
 ): PaperTaskReadingView | undefined {
+  const document = readDocumentArtifact(root, 'deep-reading')
+  if (document.kind === 'invalid') return undefined
+  if (document.kind === 'document') {
+    const view = paperTaskReadingViewSchema.safeParse({
+      taskId, markdown: document.markdown, assets: documentAssets(document),
+      status: document.stale || document.metadata.limitations.length > 0 || document.source.metadata.sourceStatus !== 'complete' ? 'needs-confirmation' : 'preview',
+    })
+    return view.success ? view.data : undefined
+  }
   try {
     const directory = workspacePaths(root).branchDirectories['deep-reading']
     const markdown = readFileSync(join(directory, 'report.md'), 'utf8')

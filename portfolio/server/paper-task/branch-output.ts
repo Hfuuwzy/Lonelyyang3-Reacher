@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
 import type { RunResult } from '@deepseek-ai/dsh-sdk-client'
+import { readDocumentArtifact } from './document-artifact.mjs'
 
 /**
  * Verifies that the branch actually published the bytes the runtime read.
@@ -30,6 +31,8 @@ export function hasSuccessfulBranchWrite(
       return false
     }
     if (branch === 'translation') {
+      const wholeDocument = z.object({ markdown: z.string().min(1) }).safeParse(rawArguments)
+      if (wholeDocument.success) return wholeDocument.data.markdown === markdown || (branchRoot !== undefined && hasCompletedLocalRepair(branchRoot, markdown))
       return z.object({ segments: z.array(z.unknown()).min(1) }).safeParse(rawArguments).success
     }
     const argumentsResult = z.object({ markdown: z.string().min(1) }).safeParse(rawArguments)
@@ -42,11 +45,22 @@ export function hasSuccessfulBranchWrite(
 function hasCompletedLocalRepair(branchRoot: string, markdown: string): boolean {
   try {
     const artifact: unknown = JSON.parse(readFileSync(join(branchRoot, 'review.json'), 'utf8'))
-    const parsed = z.object({
-      repair: z.object({
+    const repairSchema = z.union([
+      z.object({
+        attempted: z.literal(true),
+        appliedFindingIds: z.array(z.string()),
+        residualFindingIds: z.array(z.string()),
+        changedTargets: z.array(z.number().int().nonnegative()),
         repairedSha256: z.string().regex(/^[0-9a-f]{64}$/u),
         error: z.string().optional(),
-      }).strict().nullable(),
+      }).strict(),
+      z.object({
+        repairedSha256: z.string().regex(/^[0-9a-f]{64}$/u),
+        error: z.string().optional(),
+      }).strict(),
+    ])
+    const parsed = z.object({
+      repair: repairSchema.nullable(),
     }).passthrough().safeParse(artifact)
     return parsed.success
       && parsed.data.repair !== null
@@ -58,14 +72,17 @@ function hasCompletedLocalRepair(branchRoot: string, markdown: string): boolean 
 }
 
 export function translationMasterMatches(branchRoot: string, markdown: string): boolean {
+  const document = readDocumentArtifact(join(branchRoot, '..', '..'), 'translation')
+  if (document.kind !== 'legacy') return document.kind === 'document' && document.markdown === markdown
   try {
     const metadata: unknown = JSON.parse(readFileSync(join(branchRoot, 'translation.json'), 'utf8'))
     const parsed = z.object({
       masterSha256: z.string().regex(/^[0-9a-f]{64}$/u),
-      segments: z.array(z.unknown()).min(1),
+      segments: z.array(z.object({ markdown: z.string() }).passthrough()).min(1),
     }).passthrough().safeParse(metadata)
     return parsed.success
       && parsed.data.masterSha256 === createHash('sha256').update(markdown).digest('hex')
+      && parsed.data.segments.map((segment) => segment.markdown).join('\n\n') === markdown
       && readFileSync(join(branchRoot, 'preview.md'), 'utf8') === markdown
   } catch {
     return false

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { inspectTranslationMaster } from './translation-master.mjs'
+import { translationBlockers } from './translation-eligibility.mjs'
 import { inspectDeepReadingReport } from './deep-reading-report.mjs'
 
 export const REVIEW_CODES = ['terminology', 'number', 'omission', 'evidence', 'layout', 'other']
@@ -95,6 +96,16 @@ export function planTranslationRepair({ metadata, args, findings, context }) {
     unresolved: args.unresolved ?? metadata.unresolved.map((item) => ({ record_id: item.recordId, reason: item.reason })),
   }
   const after = inspectTranslationMaster(rawArgs, context)
+  const blockers = translationBlockers({
+    records: context.records,
+    segments: after.metadata.segments,
+    unresolved: after.metadata.unresolved,
+    markdown: after.markdown,
+    sourceStatus: context.state.status,
+    translationStatus: after.metadata.status,
+    issues: after.issues,
+  })
+  if (blockers.length > 0) throw new Error(`translation repair is blocked: ${blockers.join(', ')}`)
   assertNoNewIssues(before.issues, after.issues, 'repair introduces an unverified coverage or numeric change')
   const { appliedFindingIds, residualFindingIds } = resolution(findings, changedIndexes)
   return {

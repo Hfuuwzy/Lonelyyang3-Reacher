@@ -1,9 +1,9 @@
 import { isPaperReviewStreamEvent } from './paper-review-contract'
 import type {
   PaperReviewErrorEvent,
-  PaperReviewReport,
   PaperReviewStreamEvent,
 } from './paper-review-contract'
+import type { PaperReviewTaskResult } from './paper-review-task-contract'
 
 /**
  * Browser-safe consumer for the paper-review `text/event-stream` response.
@@ -12,7 +12,7 @@ import type {
  * `ReadableStream<Uint8Array>` from `Response.body` with a streaming
  * `TextDecoder`). This module never performs a fetch or a second request: it
  * consumes the single provided stream exactly once and stops at the first
- * terminal event (report or error).
+ * terminal event (result or error).
  */
 
 export type PaperReviewStreamErrorCode = 'malformed-json' | 'unknown-event' | 'missing-terminal-event'
@@ -26,7 +26,7 @@ export interface PaperReviewStreamError {
 export type PaperReviewStreamEventOrError = PaperReviewStreamEvent | PaperReviewStreamError
 
 export type PaperReviewStreamOutcome =
-  | { readonly kind: 'report'; readonly report: PaperReviewReport }
+  | { readonly kind: 'result'; readonly result: PaperReviewTaskResult }
   | { readonly kind: 'error'; readonly error: PaperReviewStreamError | PaperReviewErrorEvent }
 
 export interface PaperReviewStreamHandlers {
@@ -106,7 +106,7 @@ function parsePaperReviewEvent(payload: string): PaperReviewStreamEventOrError {
 }
 
 /**
- * Consumes a paper-review stream until a terminal event (report or error), a
+ * Consumes a paper-review stream until a terminal event (result or error), a
  * malformed/unknown event, or end-of-stream without a terminal event. Stage
  * events are forwarded through `handlers.onEvent` as they arrive.
  */
@@ -132,8 +132,8 @@ export async function consumePaperReviewStream(
     switch (event.type) {
       case 'stage':
         break
-      case 'report':
-        return { kind: 'report', report: event.report }
+      case 'result':
+        return { kind: 'result', result: event.result }
       case 'error':
         return { kind: 'error', error: event }
       default:
@@ -146,7 +146,7 @@ export async function consumePaperReviewStream(
     error: {
       type: 'stream-error',
       code: 'missing-terminal-event',
-      message: '审阅流已结束但未收到 report 或 error 终止事件，本次审阅结果不可用。请确认后端审阅路由已实现，然后重新提交。',
+      message: '审阅流已结束但未收到 result 或 error 终止事件，本次审阅结果不可用。请确认后端审阅路由已实现，然后重新提交。',
     },
   }
 }

@@ -10,7 +10,10 @@ import {
 } from '../../app/utils/paper-task-contract'
 import type { PaperTaskImageReceipt } from '../../app/utils/paper-task-image-contract'
 import { readPaperTaskImageReceipts } from './image-receipts'
+import { translationBlockers } from './translation-eligibility.mjs'
 import { workspacePaths } from './workspace'
+import { readDocumentArtifact } from './document-artifact.mjs'
+import { evaluateDocumentQuality } from './document-review.mjs'
 
 export type PaperTaskBranchQualityStatus = PaperTaskQualityState | 'failed'
 export type PaperTaskQualityIssueSeverity = 'minor' | 'substantive'
@@ -72,7 +75,7 @@ const translationMetadataSchema = z.object({
     dependencies: z.array(z.object({
       recordId: z.string().regex(/^p\d+-r\d+$/u),
       revision: z.number().int().positive(),
-    })).min(1),
+    })),
   }).strict()).min(1),
   terminology: z.array(z.object({ source: z.string().min(1), target: z.string().min(1) }).strict()),
   unresolved: z.array(z.object({ recordId: z.string().regex(/^p\d+-r\d+$/u), reason: z.string().min(1) }).strict()),
@@ -137,6 +140,8 @@ const reviewArtifactSchema = z.object({
 }).strict()
 
 export function evaluateBranchQuality(root: string, branch: PaperTaskBranch): PaperTaskBranchQuality {
+  const document = readDocumentArtifact(root, branch)
+  if (document.kind !== 'legacy') return evaluateDocumentQuality(root, branch, document)
   const paths = workspacePaths(root)
   const branchRoot = paths.branchDirectories[branch]
   const source = readSource(paths.sourceRecordsDir, join(paths.root, 'source-index.json'), paths.sourceStatePath)
@@ -158,6 +163,15 @@ export function evaluateBranchQuality(root: string, branch: PaperTaskBranch): Pa
   addReviewIssues(reviewState, output.sha256, branch, add)
   if ('metadata' in output) {
     inspectTranslationSource(output.metadata, source, recordsById, branchRoot, add)
+    const blockers = translationBlockers({
+      records: source.records,
+      segments: output.metadata.segments,
+      unresolved: output.metadata.unresolved,
+      sourceStatus: source.state.status,
+      translationStatus: output.metadata.status,
+    })
+    for (const code of blockers) add(code, translationBlockerMessage(code))
+    if (blockers.length > 0) return failed('translation-ineligible', issues)
   } else {
     inspectDeepReadingEvidence(output.evidence, source, recordsById, branchRoot, add)
   }
@@ -171,6 +185,19 @@ export function evaluateBranchQuality(root: string, branch: PaperTaskBranch): Pa
     return { status: 'preview', issues, options: PREVIEW_OPTIONS, reviewCompleted: false }
   }
   return { status: 'complete', issues, options: [], reviewCompleted: true }
+}
+
+function translationBlockerMessage(code: string): string {
+  const messages: Record<string, string> = {
+    'covered-and-unresolved': '同一原文记录不能同时列为已翻译和未解决。',
+    'gap-translated': '不可恢复的原文记录不能作为已翻译内容。',
+    'ambiguous-translated': '模糊或缺失的原文记录必须列为未解决。',
+    'disclosure-missing': '未完成译文必须向读者说明待确认内容。',
+    'record-uncovered': '有原文的文本记录未翻译，也未声明为未解决。',
+    'translation-no-prose': '原文有可翻译正文，但主稿没有呈现译文正文。',
+    'master-too-short': '与原文正文关联的译文严重过短。',
+  }
+  return messages[code] ?? '翻译主稿不符合读者发布条件。'
 }
 
 function reviewIsStale(artifact: z.infer<typeof reviewArtifactSchema>, sha256: string): boolean {
@@ -206,6 +233,7 @@ function readTranslation(
     const parsed = translationMetadataSchema.safeParse(JSON.parse(readFileSync(join(branchRoot, 'translation.json'), 'utf8')))
     const sha256 = hash(markdown)
     if (!parsed.success || preview !== markdown || parsed.data.masterSha256 !== sha256) return undefined
+    if (parsed.data.segments.map((segment) => segment.markdown).join('\n\n') !== markdown) return undefined
     return { sha256, metadata: parsed.data }
   } catch {
     return undefined

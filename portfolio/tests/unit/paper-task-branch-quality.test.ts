@@ -30,12 +30,20 @@ describe('branch quality evaluation', () => {
     })
   })
 
-  it('marks a readable translation with a missing appendix or unavailable asset as needs-confirmation', () => {
+  it('marks a disclosed partial translation with an unavailable asset as needs-confirmation', () => {
     const fixture = translationFixture({ omitAppendix: true, unavailableFigure: true })
     const result = evaluateBranchQuality(fixture.root, 'translation')
     expect(result.status).toBe('needs-confirmation')
-    expect(result.issues.map((issue) => issue.code)).toEqual(expect.arrayContaining(['missing-coverage', 'asset-unavailable']))
+    expect(result.issues.map((issue) => issue.code)).toEqual(expect.arrayContaining(['unresolved-material', 'asset-unavailable']))
     expect(result.options).toContain('keep-readable')
+  })
+
+  it('fails and removes keep-readable for a placeholder that claims a present prose record', () => {
+    const fixture = translationFixture({ placeholder: true })
+    const result = evaluateBranchQuality(fixture.root, 'translation')
+    expect(result.status).toBe('failed')
+    expect(result.issues.map((issue) => issue.code)).toContain('master-too-short')
+    expect(result.options).not.toContain('keep-readable')
   })
 
   it('marks a deep-reading result with missing source material as needs-confirmation', () => {
@@ -150,6 +158,7 @@ type TranslationOptions = {
   readonly repairError?: boolean
   readonly corruptAsset?: boolean
   readonly omitTerminologyTarget?: boolean
+  readonly placeholder?: boolean
 }
 
 function translationFixture(options: TranslationOptions = {}) {
@@ -157,9 +166,13 @@ function translationFixture(options: TranslationOptions = {}) {
   const source = writeSource(root, { unavailableFigure: options.unavailableFigure, corruptAsset: options.corruptAsset })
   const number = options.number ?? '47.5%'
   const terminology = options.omitTerminologyTarget === true ? '样例' : '样本'
-  const segments = [
-    { markdown: `# 引言\n\n${terminology}使12所学校的成绩提高了${number}。`, deps: ['p1-r0', 'p1-r1'] },
-    ...(options.omitAppendix === true ? [] : [{ markdown: '## 附录 A 补充结果\n\n作者给出补充结果。', deps: ['p1-r2'] }]),
+  const segments = options.placeholder === true
+    ? [{ markdown: '测试段', deps: ['p1-r1'] }]
+    : [
+    { markdown: `# 引言\n\n${terminology}使12所学校的成绩提高了${number}。${options.omitAppendix === true ? '\n\n研究结果与参与者背景均按原文完整呈现，并保留了相关分析语境。' : ''}`, deps: ['p1-r0', 'p1-r1'] },
+    ...(options.omitAppendix === true
+      ? [{ markdown: '待补：附录原文尚未核实。', deps: [] }]
+      : [{ markdown: '## 附录 A 补充结果\n\n作者给出补充结果。', deps: ['p1-r2'] }]),
     { markdown: '脚注：资助说明。', deps: ['p1-r3'] },
     { markdown: '## 参考文献\n\nSmith, J. (2020). A study of learning.', deps: ['p1-r4'] },
     { markdown: `图1：各组趋势。\n\n![图1 各组趋势](asset:${FIGURE})`, deps: ['p1-r5'] },
@@ -168,7 +181,7 @@ function translationFixture(options: TranslationOptions = {}) {
   const markdown = segments.map((segment) => segment.markdown).join('\n\n')
   const metadata = {
     version: 1,
-    status: 'complete',
+    status: options.omitAppendix === true ? 'incomplete' : 'complete',
     sourceRevision: 1,
     masterSha256: options.masterSha ?? hash(markdown),
     segments: segments.map((segment, index) => ({
@@ -176,7 +189,9 @@ function translationFixture(options: TranslationOptions = {}) {
       dependencies: segment.deps.map((recordId) => ({ recordId, revision: 1 })),
     })),
     terminology: [{ source: 'sample', target: '样本' }],
-    unresolved: [],
+    unresolved: options.omitAppendix === true
+      ? [{ recordId: 'p1-r2', reason: '附录原文尚未核实。' }]
+      : [],
     assets: [
       { id: TABLE, recordId: 'p1-r6', kind: 'table', caption: 'Table 1. Outcomes by group', availability: 'available' },
       { id: FIGURE, recordId: 'p1-r5', kind: 'figure', caption: 'Figure 1. Trend by group', availability: 'available' },

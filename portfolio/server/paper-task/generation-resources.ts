@@ -1,173 +1,102 @@
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
-import { lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { z } from 'zod'
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
+import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { readSkillManifest, loadSkillSnapshot, skillResourceFilename } from './skill-resources.mjs'
 
-const TRANSLATION_ROOT = join(homedir(), '.skills', 'myCreatsSkills', 'academic-paper-translation-skill', 'academic-paper-translation-skill')
-const DEEP_READING_ROOT = resolve(process.cwd(), '..', '.opencode', 'skills', 'deep-reading-analyst')
+const DEFAULT_ROOTS = {
+  translation: join(homedir(), '.skills', 'myCreatsSkills', 'academic-paper-translation-skill', 'academic-paper-translation-skill'),
+  'deep-reading': resolve(process.cwd(), '..', '.opencode', 'skills', 'deep-reading-analyst'),
+} as const
+const TEXT_EXTENSIONS = new Set(['.md', '.markdown', '.txt', '.json', '.yaml', '.yml', '.toml', '.csv', '.py', '.js', '.mjs', '.ts'])
+const EXCLUDED_DIRECTORIES = new Set(['.git', 'node_modules', '.venv', '__pycache__', '.pdf_cache'])
+type Branch = 'translation' | 'deep-reading'
+export type GenerationResource = { readonly id: string; readonly relativePath: string; readonly path: string; readonly sha256: string }
 
-const TRANSLATION_FILES = [
-  'SKILL.md',
-  'references/translation_rules.md',
-  'references/markdown_rules.md',
-  'references/dependencies.md',
-  'references/qa_checklist.md',
-  'references/vendor_notes.md',
-  'vendor/pdfs/SKILL.md',
-  'vendor/docx/SKILL.md',
-] as const
-
-const DEEP_READING_FILES = [
-  'SKILL.md',
-  'references/5w2h_analysis.md',
-  'references/comparison_matrix.md',
-  'references/critical_thinking.md',
-  'references/first_principles.md',
-  'references/inversion_thinking.md',
-  'references/mental_models.md',
-  'references/output_templates.md',
-  'references/scqa_framework.md',
-  'references/six_hats.md',
-  'references/systems_thinking.md',
-] as const
-
-export type GenerationResource = {
-  readonly id: string
-  readonly relativePath: string
-  readonly path: string
-  readonly sha256: string
+function collectSkill(base: string): readonly { readonly relativePath: string; readonly bytes: Buffer }[] {
+  const root = realpathSync(base)
+  const result: { relativePath: string; bytes: Buffer }[] = []
+  const visited = new Set<string>()
+  let totalBytes = 0
+  const visit = (directory: string, depth: number): void => {
+    if (depth > 12) throw new Error('skill resource nesting exceeds its bound')
+    const actual = realpathSync(directory)
+    const within = relative(root, actual)
+    if (within === '..' || within.startsWith(`..${sep}`) || isAbsolute(within) || visited.has(actual)) throw new Error('skill directory escapes or cycles')
+    visited.add(actual)
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.isDirectory() && EXCLUDED_DIRECTORIES.has(entry.name)) continue
+      const path = join(directory, entry.name)
+      const stat = lstatSync(path)
+      if (stat.isSymbolicLink()) throw new Error('descendant skill links must be resolved inside the selected bundle')
+      if (stat.isDirectory()) { visit(path, depth + 1); continue }
+      if (!stat.isFile() || !TEXT_EXTENSIONS.has(extname(entry.name).toLowerCase())) continue
+      if (stat.size > 512 * 1024 || result.length >= 512) throw new Error('skill resource exceeds its bound')
+      const bytes = readFileSync(path)
+      totalBytes += bytes.byteLength
+      if (totalBytes > 8 * 1024 * 1024 || bytes.includes(0)) throw new Error('skill bundle exceeds its textual resource bound')
+      new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+      result.push({ relativePath: relative(root, path).split(sep).join('/'), bytes })
+    }
+  }
+  visit(root, 0)
+  if (!result.some(entry => entry.relativePath === 'SKILL.md')) throw new Error('selected skill must provide SKILL.md')
+  return result.sort((left, right) => left.relativePath.localeCompare(right.relativePath))
 }
 
-class PinnedSkillMismatchError extends Error {
-  override readonly name = 'PinnedSkillMismatchError'
-}
-
-export function snapshotGenerationResources(
-  root: string,
-  branches: readonly ('translation' | 'deep-reading')[],
-  roots: { readonly translation?: string; readonly 'deep-reading'?: string } = {},
-): {
-  readonly resources: readonly GenerationResource[]
-  readonly unavailableBranches: readonly ('translation' | 'deep-reading')[]
+export function snapshotGenerationResources(root: string, branches: readonly Branch[], roots: Partial<Record<Branch, string>> = {}): {
+  readonly resources: readonly GenerationResource[]; readonly unavailableBranches: readonly Branch[]
 } {
   const directory = join(root, 'generation-resources')
   mkdirSync(directory, { recursive: true })
-  const selected: { readonly prefix: 'translation' | 'deep-reading'; readonly base: string; readonly files: readonly string[] }[] = []
-  if (branches.includes('translation')) selected.push({ prefix: 'translation', base: resolve(roots.translation ?? process.env.PAPER_TASK_TRANSLATION_SKILL_ROOT ?? TRANSLATION_ROOT), files: TRANSLATION_FILES })
-  if (branches.includes('deep-reading')) selected.push({ prefix: 'deep-reading', base: resolve(roots['deep-reading'] ?? process.env.PAPER_TASK_DEEP_READING_SKILL_ROOT ?? DEEP_READING_ROOT), files: DEEP_READING_FILES })
   const resources: GenerationResource[] = []
-  const unavailableBranches: ('translation' | 'deep-reading')[] = []
+  const unavailableBranches: Branch[] = []
   const indexPath = join(directory, 'index.json')
-  let priorManifest: readonly { readonly id: string; readonly relativePath: string; readonly sha256: string }[] | undefined
-  try {
-    if (lstatSync(indexPath).isSymbolicLink()) throw new PinnedSkillMismatchError()
-    const actualIndex = realpathSync(indexPath)
-    const indexRelative = relative(realpathSync(directory), actualIndex)
-    if (indexRelative === '..' || indexRelative.startsWith(`..${sep}`) || isAbsolute(indexRelative)) throw new PinnedSkillMismatchError()
-    priorManifest = generationResourceManifest(root)
-  } catch (error) {
-    if (error instanceof PinnedSkillMismatchError) throw error
-    if (!(error instanceof Error) || !('code' in error) || error.code !== 'ENOENT') throw error
-  }
-  for (const skill of selected) {
+  const prior = existsSync(indexPath) ? readSkillManifest(directory) : undefined
+  const manifest: { id: string; relativePath: string; sha256: string }[] = []
+  for (const branch of branches) {
     try {
-      if (priorManifest !== undefined) {
-        const branchEntries = priorManifest.filter((entry) => entry.id.startsWith(`${skill.prefix}:`))
-        if (branchEntries.length !== skill.files.length || new Set(branchEntries.map((entry) => entry.id)).size !== skill.files.length) throw new PinnedSkillMismatchError()
-        const branchResources = branchEntries.map((entry) => {
-          const expectedPath = skill.files.find((relativePath) => entry.id === `${skill.prefix}:${relativePath.replaceAll('/', ':')}`)
-          if (expectedPath !== entry.relativePath) throw new PinnedSkillMismatchError()
-          const path = join(directory, resourceFilename(entry.id))
-          const actualPath = realpathSync(path)
-          const actualRelative = relative(realpathSync(directory), actualPath)
-          if (actualRelative === '..' || actualRelative.startsWith(`..${sep}`) || isAbsolute(actualRelative)) throw new PinnedSkillMismatchError()
-          const bytes = readFileSync(actualPath)
-          if (createHash('sha256').update(bytes).digest('hex') !== entry.sha256
-            || (skill.prefix === 'translation' && entry.relativePath === 'SKILL.md' && !hasPinnedTranslationIdentity(bytes.toString('utf8')))) throw new PinnedSkillMismatchError()
-          return { id: entry.id, relativePath: entry.relativePath, path, sha256: entry.sha256 }
-        })
-        resources.push(...branchResources)
+      if (prior !== undefined) {
+        loadSkillSnapshot(directory, branch)
+        for (const entry of prior.filter(item => item.id.startsWith(`${branch}:`))) {
+          resources.push({ ...entry, path: join(directory, skillResourceFilename(branch, entry.relativePath)) })
+        }
         continue
       }
-      const base = realpathSync(skill.base)
-      const contents: { readonly id: string; readonly relativePath: string; readonly bytes: Buffer; readonly sha256: string }[] = []
-      for (const relativePath of skill.files) {
-        const id = `${skill.prefix}:${relativePath.replaceAll('/', ':')}`
-        const sourcePath = resolve(skill.base, relativePath)
-        const actualPath = realpathSync(sourcePath)
-        const actualRelative = relative(base, actualPath)
-        if (actualRelative === '..' || actualRelative.startsWith(`..${sep}`) || isAbsolute(actualRelative)) throw new PinnedSkillMismatchError()
-        const bytes = readFileSync(actualPath)
-        if (skill.prefix === 'translation' && relativePath === 'SKILL.md' && !hasPinnedTranslationIdentity(bytes.toString('utf8'))) {
-          throw new PinnedSkillMismatchError()
-        }
-        contents.push({ id, relativePath, bytes, sha256: createHash('sha256').update(bytes).digest('hex') })
+      const selected = roots[branch] ?? (branch === 'translation' ? process.env.PAPER_TASK_TRANSLATION_SKILL_ROOT : process.env.PAPER_TASK_DEEP_READING_SKILL_ROOT) ?? DEFAULT_ROOTS[branch]
+      const files = collectSkill(selected)
+      const entries = files.map(file => ({ id: `${branch}:${file.relativePath.replaceAll('/', ':')}`, relativePath: file.relativePath, sha256: createHash('sha256').update(file.bytes).digest('hex') }))
+      if (new Set(files.map(file => skillResourceFilename(branch, file.relativePath).toLowerCase())).size !== files.length) throw new Error('skill snapshot filenames collide')
+      for (const [index, file] of files.entries()) {
+        const entry = entries[index]
+        if (entry === undefined) throw new Error('skill snapshot entry missing')
+        const path = join(directory, skillResourceFilename(branch, file.relativePath))
+        writeFileSync(path, file.bytes, { flag: 'wx', mode: 0o444 })
+        resources.push({ ...entry, path })
       }
-      for (const item of contents) existingSnapshot(join(directory, resourceFilename(item.id)), item.bytes)
-      const branchResources: GenerationResource[] = []
-      for (const item of contents) {
-        const path = join(directory, resourceFilename(item.id))
-        if (existingSnapshot(path, item.bytes) === false) writeFileSync(path, item.bytes, { flag: 'wx', mode: 0o444 })
-        branchResources.push({ id: item.id, relativePath: item.relativePath, path, sha256: item.sha256 })
-      }
-      resources.push(...branchResources)
+      manifest.push(...entries)
     } catch (error) {
-      unavailableBranches.push(skill.prefix)
-      if (!(error instanceof PinnedSkillMismatchError)
-        && (!(error instanceof Error) || !('code' in error) || !['ENOENT', 'EACCES', 'EPERM'].includes(String(error.code)))) throw error
+      if (!(error instanceof Error)) throw error
+      unavailableBranches.push(branch)
     }
   }
-  const manifest = resources.map(({ id, relativePath, sha256 }) => ({ id, relativePath, sha256 }))
-  if (priorManifest === undefined) {
-    writeFileSync(indexPath, JSON.stringify(manifest), { flag: 'wx', mode: 0o444 })
-  }
+  if (prior === undefined) writeFileSync(indexPath, JSON.stringify(manifest), { flag: 'wx', mode: 0o444 })
   return { resources, unavailableBranches }
 }
 
-function hasPinnedTranslationIdentity(contents: string): boolean {
-  const frontmatter = contents.match(/^---\r?\n([\s\S]*?)\r?\n---/u)?.[1]
-  if (frontmatter === undefined) return false
-  const name = frontmatter.match(/^name:\s*(\S+)\s*$/mu)?.[1]
-  const version = frontmatter.match(/^version:\s*(\S+)\s*$/mu)?.[1]
-  return name === 'academic-paper-zh-translation' && version === '1.1.0'
+export function generationResourceManifest(root: string) {
+  return readSkillManifest(join(root, 'generation-resources'))
 }
 
 export function readGenerationResource(root: string, resourceId: string): string | undefined {
-  if (!/^(translation|deep-reading):[A-Za-z0-9_:.\/-]+\.md$/.test(resourceId) || resourceId.includes('..')) return undefined
-  const path = join(root, 'generation-resources', resourceFilename(resourceId))
   try {
-    const actualRoot = realpathSync(join(root, 'generation-resources'))
-    const actualPath = realpathSync(path)
-    const actualRelative = relative(actualRoot, actualPath)
-    if (actualRelative === '..' || actualRelative.startsWith(`..${sep}`) || isAbsolute(actualRelative)) return undefined
-    const bytes = readFileSync(actualPath)
-    const manifestEntry = generationResourceManifest(root).find((entry) => entry.id === resourceId)
-    if (manifestEntry === undefined || createHash('sha256').update(bytes).digest('hex') !== manifestEntry.sha256) return undefined
-    return bytes.toString('utf8')
+    const entry = generationResourceManifest(root).find(item => item.id === resourceId)
+    if (entry === undefined) return undefined
+    const branch = resourceId.split(':')[0]
+    loadSkillSnapshot(join(root, 'generation-resources'), branch)
+    return readFileSync(join(root, 'generation-resources', skillResourceFilename(branch, entry.relativePath)), 'utf8')
   } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return undefined
-    throw error
-  }
-}
-
-export function generationResourceManifest(root: string): readonly { readonly id: string; readonly relativePath: string; readonly sha256: string }[] {
-  return z.array(z.object({ id: z.string(), relativePath: z.string(), sha256: z.string().regex(/^[0-9a-f]{64}$/u) }).strict())
-    .parse(JSON.parse(readFileSync(join(root, 'generation-resources', 'index.json'), 'utf8')))
-}
-
-function resourceFilename(id: string): string {
-  return id.replaceAll(':', '--').replaceAll('/', '--')
-}
-
-function existingSnapshot(path: string, expected: Buffer): boolean {
-  try {
-    const actual = readFileSync(path)
-    if (!actual.equals(expected)) throw new PinnedSkillMismatchError()
-    return true
-  } catch (error) {
-    if (error instanceof PinnedSkillMismatchError) throw error
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return false
+    if (error instanceof Error) return undefined
     throw error
   }
 }

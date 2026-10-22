@@ -2,15 +2,16 @@ import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { readBytes, writeOwnedFile } from './controlled-files.mjs'
 import { inspectTranslationMaster } from './translation-master.mjs'
+import { translationBlockers } from './translation-eligibility.mjs'
 
 const MAX_SOURCE_BYTES = 2_000_000
 
 /**
  * Publishes a whole-paper translation master into the branch workspace. The
  * source index must be fully discovered and every indexed record completely
- * read before the ledger is accepted. Quality findings are retained with the
- * readable master instead of discarding it; the runtime gate decides whether
- * the branch can be complete.
+ * read before the ledger is accepted. Blocking eligibility findings reject
+ * publication so generation can correct the master; other quality findings
+ * remain reviewable on a retained preview.
  */
 export async function publishTranslationMaster(context) {
   const { args, taskRoot, sourceRoot, branchRoot, indexedIds, sourceReads, sourceIndexRead, indexBytes } = context
@@ -32,6 +33,16 @@ export async function publishTranslationMaster(context) {
   const inspected = inspectTranslationMaster(args, {
     records: storedSources, state, indexIds: indexedIds, sourceRevision: state.revision,
   })
+  const blockers = translationBlockers({
+    records: storedSources,
+    segments: inspected.metadata.segments,
+    unresolved: inspected.metadata.unresolved,
+    markdown: inspected.markdown,
+    sourceStatus: state.status,
+    translationStatus: inspected.metadata.status,
+    issues: inspected.issues,
+  })
+  if (blockers.length > 0) throw new Error(`translation publication is blocked: ${blockers.join(', ')}`)
   await writeOwnedFile(branchRoot, 'master.md', inspected.markdown)
   await writeOwnedFile(branchRoot, 'preview.md', inspected.markdown)
   await writeOwnedFile(branchRoot, 'translation.json', JSON.stringify(inspected.metadata))

@@ -187,6 +187,59 @@ describe('translation master validation', () => {
     )).toThrow('too short')
   })
 
+  it('blocks a placeholder under 200 characters even when it claims the source dependency', () => {
+    const records = [stored('p1-r0', 'body', `The source contains detailed research findings. ${'Additional evidence and context. '.repeat(4)}`)]
+    expect(() => validateTranslationMaster(
+      { segments: [{ markdown: '测试段', source_record_ids: ['p1-r0'] }] },
+      { records, state: { status: 'complete', revision: 1, assets: [] }, indexIds: ['p1-r0'], sourceRevision: 1 },
+    )).toThrow('too short')
+  })
+
+  it('blocks a placeholder that claims every indexed prose record', () => {
+    const records = [
+      stored('p1-r0', 'body', `First source section. ${'Detailed findings remain in the manuscript. '.repeat(5)}`),
+      stored('p1-r1', 'appendix', `Appendix source section. ${'Additional results remain in the manuscript. '.repeat(5)}`),
+    ]
+    const indexIds = records.map((entry) => entry.record.id)
+    expect(() => validateTranslationMaster(
+      { segments: [{ markdown: '测试段', source_record_ids: indexIds }] },
+      { records, state: { status: 'complete', revision: 1, assets: [] }, indexIds, sourceRevision: 1 },
+    )).toThrow('too short')
+  })
+
+  it('does not let unrelated reference text pad a short translation', () => {
+    const records = [
+      stored('p1-r0', 'body', `The source contains detailed research findings. ${'Additional evidence and context. '.repeat(4)}`),
+      stored('p1-r1', 'reference', `Smith, J. (2020). ${'An unrelated citation entry. '.repeat(30)}`),
+    ]
+    expect(() => validateTranslationMaster(
+      { segments: [
+        { markdown: '测试段', source_record_ids: ['p1-r0'] },
+          { markdown: `## References\n\n${records[1]?.record.text}\n\n1 2 3 5 8 13 21 34 55 89 144 233`, source_record_ids: ['p1-r1'] },
+      ] },
+      { records, state: { status: 'complete', revision: 1, assets: [] }, indexIds: records.map((entry) => entry.record.id), sourceRevision: 1 },
+    )).toThrow('too short')
+  })
+
+  it('keeps an explicitly unresolved appendix when the remaining translated prose is meaningful and disclosed', () => {
+    const records = [
+      stored('p1-r0', 'body', 'The study reports meaningful results for the participant group.'),
+      stored('p1-r1', 'appendix', 'Appendix A. Additional details unavailable.'),
+    ]
+    const result = validateTranslationMaster(
+      {
+        segments: [
+          { markdown: '研究报告了参与者组的有意义结果。', source_record_ids: ['p1-r0'] },
+          { markdown: '待补：附录原文无法读取。', source_record_ids: [] },
+        ],
+        unresolved: [{ record_id: 'p1-r1', reason: '附录原文当前无法读取。' }],
+      },
+      { records, state: { status: 'complete', revision: 1, assets: [] }, indexIds: records.map((entry) => entry.record.id), sourceRevision: 1 },
+    )
+    expect(result.metadata.status).toBe('incomplete')
+    expect(result.metadata.unresolved).toEqual([{ recordId: 'p1-r1', reason: '附录原文当前无法读取。' }])
+  })
+
   it('rejects translating an ambiguous record instead of declaring it unresolved', () => {
     const records = [stored('p1-r0', 'body', 'Ambiguous source line.', 'ambiguous')]
     expect(() => validateTranslationMaster(

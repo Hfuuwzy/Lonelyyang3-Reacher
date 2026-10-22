@@ -1,8 +1,10 @@
+/// <reference types="node" />
 import { createCanvas } from '@napi-rs/canvas'
 import { createServer, type Server } from 'node:http'
 import { request as httpRequest } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { PaperTaskImageReason, PaperTaskImageReceipt } from '../../app/utils/paper-task-image-contract'
+import type { PaperTaskProviderProtocol } from '../../app/utils/paper-task-provider-contract'
 import { decodePaperTaskPng, type PreparedPaperTaskImage } from '../../server/paper-task/image-input'
 import { startPaperTaskImageGuard } from '../../server/paper-task/image-request-guard'
 
@@ -17,13 +19,13 @@ async function image(width: number, height: number, context: string): Promise<Pr
   return { assetId: `asset-${String(width).padStart(32, '0')}`, recordId: `p1-r${width}`, revision: 1, context, data: Buffer.from(bytes).toString('base64'), ...decoded }
 }
 
-async function provider(): Promise<{ readonly baseUrl: string; readonly received: Array<{ readonly body: string; readonly authorization: string | undefined }> }> {
-  const received: Array<{ readonly body: string; readonly authorization: string | undefined }> = []
+async function provider(): Promise<{ readonly baseUrl: string; readonly received: Array<{ readonly url: string | undefined; readonly body: string; readonly authorization: string | undefined }> }> {
+  const received: Array<{ readonly url: string | undefined; readonly body: string; readonly authorization: string | undefined }> = []
   const server = createServer((request, response) => {
     const chunks: Buffer[] = []
     request.on('data', chunk => chunks.push(Buffer.from(chunk)))
     request.on('end', () => {
-      received.push({ body: Buffer.concat(chunks).toString('utf8'), authorization: request.headers.authorization })
+      received.push({ url: request.url, body: Buffer.concat(chunks).toString('utf8'), authorization: request.headers.authorization })
       response.writeHead(200, { 'content-type': 'application/json' })
       response.end('{"ok":true}')
     })
@@ -35,8 +37,8 @@ async function provider(): Promise<{ readonly baseUrl: string; readonly received
   return { baseUrl: `http://127.0.0.1:${address.port}/v1`, received }
 }
 
-async function guard(baseUrl: string, images: readonly PreparedPaperTaskImage[], onReceipt: (assetId: string, status: PaperTaskImageReceipt['status'], reason: PaperTaskImageReason | null) => void = () => undefined): Promise<{ readonly baseUrl: string; readonly close: () => Promise<void> }> {
-  const result = await startPaperTaskImageGuard({ provider: { baseUrl, protocol: 'openai-completions', apiKey: '' }, images, onReceipt })
+async function guard(baseUrl: string, images: readonly PreparedPaperTaskImage[], onReceipt: (assetId: string, status: PaperTaskImageReceipt['status'], reason: PaperTaskImageReason | null) => void = () => undefined, protocol: PaperTaskProviderProtocol = 'openai-completions'): Promise<{ readonly baseUrl: string; readonly close: () => Promise<void> }> {
+  const result = await startPaperTaskImageGuard({ provider: { baseUrl, protocol, apiKey: '' }, images, onReceipt })
   guards.push(result)
   return result
 }
@@ -51,6 +53,20 @@ afterEach(async () => {
 })
 
 describe('paper-task image request loopback guard', () => {
+  it('forwards Anthropic Messages requests to /v1/messages from a root Base URL', async () => {
+    const upstream = await provider()
+    const rootBaseUrl = new URL(upstream.baseUrl).origin
+    const guarded = await guard(rootBaseUrl, [], undefined, 'anthropic-messages')
+    const body = JSON.stringify({ messages: [{ role: 'user', content: 'Hello' }] })
+
+    const response = await fetch(`${guarded.baseUrl}/v1/messages`, { method: 'POST', body })
+
+    expect(response.status).toBe(200)
+    expect(upstream.received).toHaveLength(1)
+    expect(upstream.received[0]?.url).toBe('/v1/messages')
+    expect(upstream.received[0]?.body).toBe(body)
+  })
+
   it('settles a response interrupted after provider headers without an unhandled stream error', async () => {
     const server = createServer((_request, response) => {
       response.writeHead(200, { 'content-type': 'text/event-stream' })
@@ -91,6 +107,24 @@ describe('paper-task image request loopback guard', () => {
     expect(upstream.received).toHaveLength(1)
     expect(upstream.received[0]?.body).toBe(body)
     expect(upstream.received[0]?.authorization).toBeUndefined()
+  })
+
+  it('forwards a later text-only history after the approved image was sent', async () => {
+    // Given a guard whose first request carried the approved image.
+    const upstream = await provider()
+    const approved = await image(2, 3, contextOne)
+    const guardResult = await guard(upstream.baseUrl, [approved])
+    const withImage = await fetch(`${guardResult.baseUrl}/chat/completions`, { method: 'POST', body: prompt(approved.data, contextOne) })
+
+    // When a later request after history compaction carries no image blocks.
+    const textOnly = JSON.stringify({ messages: [{ role: 'user', content: [{ type: 'text', text: 'Continue after compaction.' }] }] })
+    const followUp = await fetch(`${guardResult.baseUrl}/chat/completions`, { method: 'POST', body: textOnly })
+
+    // Then the follow-up is forwarded instead of being rejected as missing images.
+    expect(withImage.status).toBe(200)
+    expect(followUp.status).toBe(200)
+    expect(upstream.received).toHaveLength(2)
+    expect(upstream.received[1]?.body).toBe(textOnly)
   })
 
   it('isolates route tokens, contexts, and expected images between guards', async () => {
@@ -135,6 +169,48 @@ describe('paper-task image request loopback guard', () => {
     expect(body).toBe('{"error":"provider request failed"}')
     expect(receipts).toContainEqual({ status: 'blocked', reason: 'provider-failed' })
     expect(receipts).not.toContainEqual({ status: 'transported', reason: null })
+  })
+
+  it('identifies an expired upstream key without relaying the provider body or credentials', async () => {
+    const server = createServer((_request, response) => {
+      response.writeHead(403, { 'content-type': 'application/json', 'www-authenticate': 'Bearer private-value' })
+      response.end(JSON.stringify({ error: 'API key 已过期 private-value' }))
+    })
+    providerServers.push(server)
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('provider test listener failed')
+    const guarded = await guard(`http://127.0.0.1:${address.port}/v1`, [])
+
+    const response = await fetch(`${guarded.baseUrl}/chat/completions`, {
+      method: 'POST', body: JSON.stringify({ messages: [{ role: 'user', content: 'Hello' }] }), signal: AbortSignal.timeout(4000),
+    })
+    const body = await response.text()
+
+    expect(response.status).toBe(403)
+    expect(body).toContain('API key expired')
+    expect(body).not.toContain('private-value')
+    expect(response.headers.get('www-authenticate')).toBeNull()
+  })
+
+  it.each(['oversized', 'unfinished'] as const)('bounds a %s provider error body and returns only the generic failure', async (mode) => {
+    const server = createServer((_request, response) => {
+      response.writeHead(403, { 'content-type': 'application/json' })
+      if (mode === 'oversized') response.end(JSON.stringify({ error: `API key expired ${'private-value'.repeat(600)}` }))
+      else response.write('{"error":"API key expired private-value')
+    })
+    providerServers.push(server)
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('provider test listener failed')
+    const guarded = await guard(`http://127.0.0.1:${address.port}/v1`, [])
+
+    const response = await fetch(`${guarded.baseUrl}/chat/completions`, {
+      method: 'POST', body: JSON.stringify({ messages: [{ role: 'user', content: 'Hello' }] }), signal: AbortSignal.timeout(4000),
+    })
+
+    expect(response.status).toBe(403)
+    expect(await response.text()).toBe('{"error":"provider request failed"}')
   })
 
   it('sanitizes request-handler callback failures and closes the upstream request', async () => {

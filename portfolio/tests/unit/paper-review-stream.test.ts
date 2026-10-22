@@ -12,30 +12,38 @@ async function* asyncChunks(chunks: readonly string[]): AsyncGenerator<string> {
   yield* chunks
 }
 
-const REPORT_EVENT =
-  '{"type":"report","report":{"status":"incomplete","provider":"goaichat","model":"glm-5.2",'
-  + '"sections":[{"kind":"claims","title":"核心论断","findings":[{"statement":"论点甲",'
-  + '"source":{"heading":"引言","readerPage":3,"printedPage":"12","quote":"原文引文甲"}}]}],'
-  + '"gaps":[{"section":"实验","reason":"数据缺失"}],"missingScope":["full-translation"]}}'
+const RESULT_EVENT =
+  '{"type":"result","result":{"status":"incomplete","provider":"goaichat","model":"glm-5.2",'
+  + '"source":{"sourceId":"s1","pageCount":1,"units":[{"id":"u-1","spans":[{"readerPage":1,"lineIndex":0,"start":0,"end":5}],"original":"abc","heading":"","kind":"paragraph"}]},'
+  + '"report":{"sections":[{"kind":"claims","title":"核心论断","findings":[{"statement":"论点甲",'
+  + '"source":{"heading":"引言","readerPage":1,"quote":"原文引文甲"}}]}],"gaps":[]},'
+  + '"translation":{"pairs":[{"unitId":"u-1","chinese":"译文"}],"review":{"reviewOf":"r1","status":"passed","checks":[{"unitId":"u-1","verdict":"passed"}]}},'
+  + '"gaps":[]}}'
 
-const EXPECTED_REPORT = {
+const EXPECTED_RESULT = {
   status: 'incomplete',
   provider: 'goaichat',
   model: 'glm-5.2',
-  sections: [
-    {
-      kind: 'claims',
-      title: '核心论断',
-      findings: [
-        {
-          statement: '论点甲',
-          source: { heading: '引言', readerPage: 3, printedPage: '12', quote: '原文引文甲' },
-        },
-      ],
-    },
-  ],
-  gaps: [{ section: '实验', reason: '数据缺失' }],
-  missingScope: ['full-translation'],
+  source: {
+    sourceId: 's1',
+    pageCount: 1,
+    units: [{ id: 'u-1', spans: [{ readerPage: 1, lineIndex: 0, start: 0, end: 5 }], original: 'abc', heading: '', kind: 'paragraph' }],
+  },
+  report: {
+    sections: [
+      {
+        kind: 'claims',
+        title: '核心论断',
+        findings: [{ statement: '论点甲', source: { heading: '引言', readerPage: 1, quote: '原文引文甲' } }],
+      },
+    ],
+    gaps: [],
+  },
+  translation: {
+    pairs: [{ unitId: 'u-1', chinese: '译文' }],
+    review: { reviewOf: 'r1', status: 'passed', checks: [{ unitId: 'u-1', verdict: 'passed' }] },
+  },
+  gaps: [],
 } as const
 
 function countingSource(chunks: readonly string[]) {
@@ -64,9 +72,9 @@ describe('paper-review stream consumer', () => {
     const chunks = [
       'data: {"type":"stage","stage":"valid',
       'ating"}\n\ndata: {"type":"stage","stage":"e',
-      'xtracting"}\n\ndata: {"type":"stage","stage":"analy',
-      'zing"}\n\r\ndata: ',
-      REPORT_EVENT,
+      'xtracting"}\n\ndata: {"type":"stage","stage":"inventor',
+      'ying"}\n\r\ndata: ',
+      RESULT_EVENT,
     ]
 
     // When: the consumer reads the split chunks.
@@ -77,24 +85,26 @@ describe('paper-review stream consumer', () => {
       },
     })
 
-    // Then: every stage event is recovered in order and the run ends in report.
+    // Then: every stage event is recovered in order and the run ends in result.
     const stages = received.flatMap((event) => (event.type === 'stage' ? [event.stage] : []))
-    expect(stages).toEqual(['validating', 'extracting', 'analyzing'])
-    expect(outcome.kind).toBe('report')
-    if (outcome.kind !== 'report') {
+    expect(stages).toEqual(['validating', 'extracting', 'inventorying'])
+    expect(outcome.kind).toBe('result')
+    if (outcome.kind !== 'result') {
       return
     }
-    expect(outcome.report).toEqual(EXPECTED_REPORT)
+    expect(outcome.result).toEqual(EXPECTED_RESULT)
   })
 
-  it('emits the four known stages in order and ends with the report event', async () => {
-    // Given: one event per known stage followed by a report.
+  it('emits the six known stages in order and ends with the result event', async () => {
+    // Given: one event per known stage followed by a result.
     const stream = [
       sse('{"type":"stage","stage":"validating"}'),
       sse('{"type":"stage","stage":"extracting"}'),
+      sse('{"type":"stage","stage":"inventorying"}'),
       sse('{"type":"stage","stage":"analyzing"}'),
+      sse('{"type":"stage","stage":"translating"}'),
       sse('{"type":"stage","stage":"verifying"}'),
-      sse(REPORT_EVENT),
+      sse(RESULT_EVENT),
     ].join('')
 
     // When: the consumer processes the stream.
@@ -107,9 +117,9 @@ describe('paper-review stream consumer', () => {
       },
     })
 
-    // Then: the stages arrive in protocol order and the report is terminal.
-    expect(stages).toEqual(['validating', 'extracting', 'analyzing', 'verifying'])
-    expect(outcome).toEqual({ kind: 'report', report: EXPECTED_REPORT })
+    // Then: the stages arrive in protocol order and the result is terminal.
+    expect(stages).toEqual(['validating', 'extracting', 'inventorying', 'analyzing', 'translating', 'verifying'])
+    expect(outcome).toEqual({ kind: 'result', result: EXPECTED_RESULT })
   })
 
   it('propagates a server error event with its stage, code, and message', async () => {
@@ -189,12 +199,12 @@ describe('paper-review stream consumer', () => {
     expect(outcome.error.message).not.toContain(secret)
   })
 
-  it('rejects report locations that use zero-based reader pages', async () => {
-    // Given a report event with readerPage zero.
-    const zeroBasedReport = '{"type":"report","report":{"status":"incomplete","provider":"goaichat","model":"glm-5.2","sections":[{"kind":"claims","title":"核心论断","findings":[{"statement":"论点甲","source":{"heading":"引言","readerPage":0,"quote":"原文引文甲"}}]}],"gaps":[],"missingScope":["full-translation"]}}'
+  it('rejects task results whose source spans use zero-based reader pages', async () => {
+    // Given a result event with a readerPage of zero in a source span.
+    const zeroBasedResult = '{"type":"result","result":{"status":"incomplete","provider":"goaichat","model":"glm-5.2","source":{"sourceId":"s1","pageCount":1,"units":[{"id":"u-1","spans":[{"readerPage":0,"lineIndex":0,"start":0,"end":5}],"original":"abc","heading":"","kind":"paragraph"}]},"report":{"sections":[],"gaps":[]},"translation":{"pairs":[],"review":{"reviewOf":"r","status":"passed","checks":[]}},"gaps":[]}}'
 
     // When the consumer validates the event.
-    const outcome = await consumePaperReviewStream(asyncChunks([sse(zeroBasedReport)]), {})
+    const outcome = await consumePaperReviewStream(asyncChunks([sse(zeroBasedResult)]), {})
 
     // Then the zero-based location is rejected as a protocol error.
     expect(outcome.kind).toBe('error')
@@ -208,8 +218,41 @@ describe('paper-review stream consumer', () => {
     expect(outcome.error.code).toBe('unknown-event')
   })
 
+  it('rejects empty source ranges in a task result', async () => {
+    // Given a result event whose source span has an empty UTF-16 range.
+    const emptyRange = RESULT_EVENT.replace('"start":0,"end":5', '"start":5,"end":5')
+
+    // When the consumer validates the event.
+    const outcome = await consumePaperReviewStream(asyncChunks([sse(emptyRange)]), {})
+
+    // Then the malformed span is rejected as a protocol error.
+    expect(outcome).toMatchObject({ kind: 'error', error: { type: 'stream-error', code: 'unknown-event' } })
+  })
+
+  it('rejects source spans beyond the declared PDF page count', async () => {
+    // Given a result event with an otherwise valid span on a nonexistent page.
+    const outOfRange = RESULT_EVENT.replace('"readerPage":1,"lineIndex":0', '"readerPage":2,"lineIndex":0')
+
+    // When the consumer validates the event.
+    const outcome = await consumePaperReviewStream(asyncChunks([sse(outOfRange)]), {})
+
+    // Then the out-of-range span is rejected as a protocol error.
+    expect(outcome).toMatchObject({ kind: 'error', error: { type: 'stream-error', code: 'unknown-event' } })
+  })
+
+  it('rejects a result whose report finding cites a page beyond the source page count', async () => {
+    // Given a result event whose report finding readerPage exceeds source.pageCount.
+    const outOfRangeCitation = RESULT_EVENT.replace('"readerPage":1,"quote":"原文引文甲"', '"readerPage":2,"quote":"原文引文甲"')
+
+    // When the consumer validates the event.
+    const outcome = await consumePaperReviewStream(asyncChunks([sse(outOfRangeCitation)]), {})
+
+    // Then the out-of-range citation is rejected as a protocol error.
+    expect(outcome).toMatchObject({ kind: 'error', error: { type: 'stream-error', code: 'unknown-event' } })
+  })
+
   it('ends in a local actionable error when the stream ends without a terminal event', async () => {
-    // Given: only stage events, no report or error.
+    // Given: only stage events, no result or error.
     const stream = sse('{"type":"stage","stage":"validating"}')
       + sse('{"type":"stage","stage":"extracting"}')
 
@@ -230,8 +273,8 @@ describe('paper-review stream consumer', () => {
   })
 
   it('consumes the provided stream exactly once and never issues a second request', async () => {
-    // Given: a counting source and a stream that ends in a report.
-    const chunks = [sse('{"type":"stage","stage":"validating"}'), sse(REPORT_EVENT)]
+    // Given: a counting source and a stream that ends in a result.
+    const chunks = [sse('{"type":"stage","stage":"validating"}'), sse(RESULT_EVENT)]
     const { source, iteratorStarts, pulls } = countingSource(chunks)
 
     // When: the consumer runs to completion.
@@ -241,6 +284,6 @@ describe('paper-review stream consumer', () => {
     // the consumer never re-reads it and never issues its own request.
     expect(iteratorStarts()).toBe(1)
     expect(pulls()).toBe(chunks.length)
-    expect(outcome.kind).toBe('report')
+    expect(outcome.kind).toBe('result')
   })
 })

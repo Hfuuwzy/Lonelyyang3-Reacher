@@ -1,11 +1,38 @@
-export const PAPER_TASK_FORMATS = ['markdown', 'docx', 'pdf'] as const
+import type { PaperTaskState } from '../../app/utils/paper-task-contract'
+import type { PaperTaskReaderDocumentStatus } from '../../app/utils/paper-task-reader-contract'
+
+export const PAPER_TASK_FORMATS = ['markdown', 'pdf'] as const
 export type PaperTaskFormat = (typeof PAPER_TASK_FORMATS)[number]
 export type PaperTaskFormatStatus = 'preview' | 'needs-confirmation' | 'complete' | 'failed'
 export type PaperTaskBranchQualityState = 'preview' | 'needs-confirmation' | 'complete' | 'failed'
 
+export function paperTaskBranchQuality(state: PaperTaskState): PaperTaskBranchQualityState {
+  if (state === 'complete') return 'complete'
+  if (state === 'needs-confirmation') return 'needs-confirmation'
+  if (state === 'failed' || state === 'cancelled' || state === 'not-selected') return 'failed'
+  return 'preview'
+}
+
+/** A readable document with unresolved or stale material cannot retain complete quality. */
+export function paperTaskDocumentQuality(
+  branchQuality: PaperTaskBranchQualityState,
+  documentStatus: PaperTaskReaderDocumentStatus,
+): PaperTaskBranchQualityState {
+  if (branchQuality === 'complete' && documentStatus !== 'complete') {
+    return documentStatus === 'preview' ? 'preview' : 'needs-confirmation'
+  }
+  return branchQuality
+}
+
 export interface PaperTaskFormatPageCheck {
   readonly page: number
   readonly status: 'passed' | 'minor' | 'blocked'
+  /** What must be visible or intact on this page. */
+  readonly expected?: string
+  /** What the maintainer actually saw in the final rendered document. */
+  readonly observed?: string
+  /** Concrete inspection reference or observation, not a build/render receipt. */
+  readonly evidence?: string
   readonly reason?: string
 }
 
@@ -76,6 +103,9 @@ export function evaluateFormatGate(state: PaperTaskFormatState): PaperTaskFormat
       || seenPages.has(page.page)) {
       return { status: 'needs-confirmation', issues: ['page-coverage-invalid'] }
     }
+    if (!nonEmpty(page.expected) || !nonEmpty(page.observed) || !nonEmpty(page.evidence)) {
+      return { status: 'needs-confirmation', issues: ['page-inspection-evidence-incomplete'] }
+    }
     seenPages.add(page.page)
     if (page.status === 'blocked') {
       return { status: 'needs-confirmation', issues: ['page-check-blocked'] }
@@ -87,6 +117,10 @@ export function evaluateFormatGate(state: PaperTaskFormatState): PaperTaskFormat
   }
 
   return { status: 'complete', issues: [] }
+}
+
+function nonEmpty(value: string | undefined): boolean {
+  return value !== undefined && value.trim().length > 0
 }
 
 function isSha256(value: string | undefined): value is string {

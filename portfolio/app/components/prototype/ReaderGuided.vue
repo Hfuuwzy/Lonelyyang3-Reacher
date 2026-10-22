@@ -10,8 +10,19 @@
     </nav>
 
     <div class="reader-guided__column">
-      <PrototypeReaderDossierMasthead :page="page" />
-      <ArticleProse :value="page" />
+      <PrototypeReaderDossierMasthead v-if="page" :page="page" />
+      <PrototypeReaderTaskMasthead
+        v-else-if="dossier"
+        :dossier="dossier"
+        :pdf-url="pdfUrl"
+        :pdf-name="pdfName ?? '论文'"
+      />
+      <ArticleProse v-if="page" :value="page" />
+      <PrototypeReaderDossier
+        v-else-if="dossier"
+        :dossier="dossier"
+        :pdf-url="pdfUrl"
+      />
     </div>
   </div>
 </template>
@@ -19,16 +30,30 @@
 <script setup lang="ts">
 import ArticleProse from '~/components/content/ArticleProse.vue'
 import type { ResearchCollectionItem } from '@nuxt/content'
+import type { PaperReviewTaskResult } from '~/utils/paper-review-task-contract'
+import { readerDossierTocLinks } from './reader-dossier-views'
 
 interface Props {
-  readonly page: ResearchCollectionItem
+  readonly page?: ResearchCollectionItem | null
+  readonly dossier?: PaperReviewTaskResult | null
+  readonly pdfUrl?: string | null
+  readonly pdfName?: string
 }
 
 const props = defineProps<Props>()
 
 // 静态研究笔记：Nuxt Content 在 SSR 阶段生成的目录，id/text 与内容渲染器产出的
 // 标题锚点一致，因此链接在直接 hash 加载时即可定位，无需在挂载后改写标题 id。
-const tocLinks = computed(() => props.page.body?.toc?.links?.filter((link) => link.depth === 2) ?? [])
+// 生成档案：由应用持有的任务结果构建章节目录，不经 ContentRenderer。
+const tocLinks = computed(() => {
+  if (props.page) {
+    return props.page.body?.toc?.links?.filter((link) => link.depth === 2) ?? []
+  }
+  if (props.dossier) {
+    return readerDossierTocLinks(props.dossier)
+  }
+  return []
+})
 </script>
 
 <style scoped>

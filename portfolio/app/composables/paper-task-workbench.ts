@@ -12,6 +12,7 @@ import {
 export interface PaperTaskWorkbench extends PaperTaskWorkbenchState {
   readonly sourceUrl: Ref<string>
   readonly sourceFallbackAvailable: Ref<boolean>
+  readonly providerSettingsRequired: Ref<boolean>
   readonly handleSubmit: () => Promise<void>
   readonly handleCancel: () => Promise<void>
   readonly handleDelete: () => Promise<void>
@@ -42,11 +43,13 @@ function assertNever(value: never): never {
 }
 
 const SOURCE_FALLBACK_MESSAGE = '无法从此链接取得可用的完整论文全文。请上传论文 PDF 继续；当前翻译/深读选择会保留。'
+const PROVIDER_SETTINGS_REQUIRED_MESSAGE = '尚未配置可用的论文任务 API。请前往“论文任务 API 设置”配置提供方、接口协议和模型；如服务商要求鉴权，请填写 API 密钥。配置后返回并重新选择论文提交。'
 
 export function usePaperTaskWorkbench(options: PaperTaskWorkbenchOptions = {}): PaperTaskWorkbench {
   const state = createPaperTaskWorkbenchState()
   const sourceUrl = ref('')
   const sourceFallbackAvailable = ref(false)
+  const providerSettingsRequired = ref(false)
   const transport = options.transport ?? createPaperTaskWorkbenchTransport()
   const registerLifecycle = options.registerLifecycle ?? registerVueLifecycle
 
@@ -79,6 +82,7 @@ export function usePaperTaskWorkbench(options: PaperTaskWorkbenchOptions = {}): 
     const source: PaperTaskSubmitSource = file !== null
       ? { kind: 'pdf', file }
       : { kind: 'url', url }
+    providerSettingsRequired.value = false
     if (source.kind === 'pdf' && sourceFallbackAvailable.value) {
       sourceUrl.value = ''
     }
@@ -126,7 +130,10 @@ export function usePaperTaskWorkbench(options: PaperTaskWorkbenchOptions = {}): 
       switch (response.kind) {
         case 'http-error':
           if (!isErrorPhase()) {
-            if (source.kind === 'url' && (response.status === 400 || response.status === 422)) {
+            if (response.status === 409) {
+              providerSettingsRequired.value = true
+              state.fail(PROVIDER_SETTINGS_REQUIRED_MESSAGE)
+            } else if (source.kind === 'url' && (response.status === 400 || response.status === 422)) {
               sourceFallbackAvailable.value = true
               state.fail(SOURCE_FALLBACK_MESSAGE)
             } else {
@@ -254,6 +261,7 @@ export function usePaperTaskWorkbench(options: PaperTaskWorkbenchOptions = {}): 
     state.pdfFile.value = null
     sourceUrl.value = ''
     sourceFallbackAvailable.value = false
+    providerSettingsRequired.value = false
     state.resetRun()
     state.phase.value = 'idle'
   }
@@ -270,6 +278,7 @@ export function usePaperTaskWorkbench(options: PaperTaskWorkbenchOptions = {}): 
     pdfFile: state.pdfFile,
     sourceUrl,
     sourceFallbackAvailable,
+    providerSettingsRequired,
     selection: state.selection,
     phase: state.phase,
     taskId: state.taskId,

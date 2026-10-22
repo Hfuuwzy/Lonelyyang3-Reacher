@@ -205,6 +205,23 @@
 - 原型始终渲染 `PrototypeReaderGuided`（`ReaderGuided.vue`），共用同一篇 `research` 集合页面项，正文一律经 `ArticleProse`（Nuxt Content `ContentRenderer`）渲染；原型不编写 Markdown 解析器、不复制正文副本。原型样式 `scoped`，只叠加既有令牌（`--paper`、`--ink`、`--ink-soft`、`--rule`、`--vermilion`、`--font-mincho`、`--paper-surface-depth`），保持开放式长文、无卡片叠卡片。
 - 可复用渲染契约：未来 `content/blog` 下的普通 Markdown 博文与外部 Nuxt Content 页面项（如 `research` 这种非 `content/` 目录源）共用 `ArticleProse` 作为唯一正文渲染器，不建立第二套正文渲染路径；选定的导读轨、档案头图与版式规则可作为未来生产阅读页的复用基础。
 
+### 4.5.2 `paper-review` 深读报告与全文译文阅读器（桌面 · 中文）
+
+- `/prototype/paper-review` 路由由父路由 `paper-review.vue` + 子路由构成：`paper-review/index.vue` 工作台、`paper-review/report.vue` 深读报告、`paper-review/translation.vue` 全文译文。父路由持有瞬态审阅会话（PDF 对象 URL + 任务结果）并经 provide/inject 向子路由提供，子路由导航间不丢失；不写入浏览器历史、localStorage、Cookie 或模块单例。API 密钥等凭据只存在于工作台子路由的页面内存，提交后立即清除；在途请求由工作台子路由自持 AbortController，卸载与 pagehide 时中止并防止迟到采纳。对象 URL 在重置、替换提交、父路由卸载与 pagehide 时吊销一次。直接访问或刷新 `/report`、`/translation`（无会话）时，给出可理解的“尚无结果 + 返回工作台”链接。
+- 阅读正文是**连续 Markdown 长文**：复用 B 变体几何（≥1600px 左侧粘性章节轨 + 独立居中的 760px 正文栏；<1600px 章节轨退化为横向章节条），正文排版沿用和纸墨色衬线体系（`Noto Serif SC → Noto Serif JP → 宋体/系统衬线`，正文 17px/1.8，标题 700 明朝体）。**主阅读不使用逐单元卡片、印章或预览 iframe**；英文原文、逐单元核验状态、未覆盖范围均以 `<details>` 二级披露呈现，不进入主阅读流。
+- 报告正文由应用侧纯投影生成（`report.sections` + 引文出处），译文正文由 `source.units` + `translation.pairs` 按源文档顺序投影为连续中文；公式、表格内部内容、页码保留原文并附 `pdf://N` 链接（渲染时解析为会话 PDF 对象 URL 的 `#page=N`）。译文缺失的段落/标题/图注在原文位置给出本地化缺失说明，不静默跳过；参考文献/附录标记为排除范围。未覆盖范围按原因聚合展示，保留全部受影响 scope 与单元，绝不把范围缩写为一句摘要；核验状态标注“逐字比对 ≠ 语义正确/结论成立”。
+- 安全渲染契约：报告与译文 Markdown 经**标准 CommonMark 解析栈（remark-parse + remark-rehype，原始 HTML 禁用）解析后做 AST 白名单渲染**——MDC 组件语法（`::name`/`:a[prop]`）与原始 HTML 一律保持为惰性字面文本、不执行、不渲染为元件或图片，`pdf://N` 仅重写为会话持有的 PDF 对象 URL；链接经 WHATWG URL 解析校验，仅允许 http/https/mailto/相对路径/`#`，控制字符与空格直接拒绝，其余属性一律剥离；标题由渲染器按顺序生成确定性 id，与章节轨 TOC 同源，杜绝锚点漂移。模型文本在投影层先转义再嵌入，双层防御。报告/译文均可下载为 `.md` 文件（译文 `.md` 附英文原文附录与核验状态）。
+- 原型页面随 `/prototype/` 在 `nuxt.config.ts` 的 `pages:extend` 生产钩子中一并排除（与既有原型一致）；仅通过 `npm run dev` 提供。
+
+### 4.5.3 `/prototype/paper-reader` 专注阅读原型
+
+- `/prototype/paper-reader` 是 issue-37 一次性阅读原型在 Nuxt 中的规范化版本，通过现有 `pages:extend` 路由机制提供，并随其他 `/prototype/` 页面从生产路由中排除。进入 `portfolio/` 后运行 `npm run dev`；无需独立 `43737` 回环服务器或 HTML 文件。默认展示已选定的 C 专注阅读版，`?variant=A|B|C` 仅用于同一页面内比较三种布局。
+- C 使用无品牌行的紧凑阅读工具栏：返回现有 `/prototype/paper-review`、打开目录、阅读状态标签，以及仅在正文主标题滚出视口后出现的短标题。工具栏居中，最大宽度 `1240px`，不做贴边全宽控制栏。正文沿用暖纸与墨色令牌，桌面字号 `20px`、移动端 `18px`，正文宽度约 `760px`。
+- PDF 使用合成夹具。译文 PDF 未就绪时，打开与下载操作均禁用，并显示有用的未就绪状态；原文入口单独作为次要操作呈现。目录抽屉的触控目标至少 `44px`，支持焦点管理及 Escape 关闭。
+- 原型局部令牌：`--reader-column: 760px`、`--reader-toolbar-width: 1240px`、`--reader-touch: 44px`、`--reader-body-size: 20px`（手机 `18px`）。工具栏桌面单行、手机两行；返回与目录、阅读对象、文档动作各有明确区域，不用额外占位文案填空。目录抽屉高于原型切换条，底部留出 `120px`，确保最后一个目录项可完整滚入视口。
+- 页面与 PDF 内容均为合成演示数据，不接模型、真实论文或生产任务流程，也不对真实 Markdown 安全、翻译质量或论文质量作出声明。该原型不构成生产集成。
+- 此 Nuxt 页面是当前规范原型；旧独立 HTML/CSS/JS、服务器和重复说明已在验证后移除。原型编译、工具栏交互与视觉检查不等同于真实论文任务验收；生产路由排除机制保持不变。
+
 ### 4.6 其他页面
 
 - 项目、电影、动漫、音乐、工具、生活、笔记和关于页共享全站外壳。
@@ -265,6 +282,18 @@
 ### `ArticleProse`
 
 - 包装 Nuxt Content 渲染结果，控制正文宽度、代码、图片、引用和标题节奏。
+
+### `PaperReviewPageShell`
+
+- 三页面共用外壳：`PaperSectionHeading` + 默认插槽；内容子项宽度 `min(100%, 920px)`，阅读路由以 `wide` 属性在 ≥1600px 取全宽交给阅读器网格。
+- 使用 `--paper-surface-depth`、`--ink-impression` 与暖纸背景，不做卡片墙。
+
+### `PaperReviewReader`
+
+- 深读报告与全文译文共用的 B 版式阅读壳：`headings` 输入渲染章节目录（过滤 `depth === 2` 链接），`masthead` / 默认 / `secondary` 三个插槽分别承载档案头图、连续 Markdown 正文与二级披露。
+- ≥1600px 粘性左轨（260px）＋独立居中 760px 正文栏；<1600px 章节目录退化为正文栏上方的横向章节条。
+- 正文连续排版：中文优先衬线、17px/1.8、标题 700 明朝体；引用采用墨色细线引文，链接朱红下划线；无逐单元卡片、无印章、无预览 iframe。
+- `secondary` 插槽内的 `<details>` 按主阅读之后出现，承载下载、英文原文对照、未覆盖范围与核验状态。
 
 ### `ScrollToTop`
 

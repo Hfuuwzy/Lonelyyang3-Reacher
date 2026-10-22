@@ -70,11 +70,14 @@
           maxlength="512"
           autocomplete="off"
           spellcheck="false"
-          placeholder="https://api.example.test/v1"
+          :placeholder="protocolInfo.baseUrlPlaceholder"
+          aria-describedby="paper-task-provider-base-url-note paper-task-provider-protocol-hint"
           required
           :disabled="phase !== 'ready'"
         />
-        <p class="paper-task-api-settings__hint">按提供方文档填写完整端点；URL 中不得包含用户名、密码或查询参数。</p>
+        <p id="paper-task-provider-base-url-note" class="paper-task-api-settings__hint">
+          填写 API 根地址；系统会按协议追加 <code>{{ protocolInfo.endpointPath }}</code>。自定义网关请按其文档填写；URL 中不得包含用户名、密码或查询参数。
+        </p>
       </div>
 
       <div class="paper-task-api-settings__field">
@@ -84,6 +87,9 @@
             {{ option.label }}
           </option>
         </select>
+        <p id="paper-task-provider-protocol-hint" class="paper-task-api-settings__hint">
+          {{ protocolInfo.guidance }}
+        </p>
       </div>
 
       <div class="paper-task-api-settings__field">
@@ -171,15 +177,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { usePaperTaskApiSettings } from '~/composables/paper-task-api-settings'
-import { PAPER_TASK_PROVIDER_PROTOCOLS, type PaperTaskProviderSettings } from '~/utils/paper-task-provider-contract'
+import { PAPER_TASK_PROVIDER_PROTOCOLS, PAPER_TASK_PROVIDER_PROTOCOL_INFO } from '~/utils/paper-task-provider-contract'
 
 const localePath = useLocalePath()
-
-const PROTOCOL_LABELS = {
-  'openai-completions': 'OpenAI Chat Completions',
-  'openai-responses': 'OpenAI Responses',
-  'anthropic-messages': 'Anthropic Messages',
-} as const satisfies Record<PaperTaskProviderSettings['protocol'], string>
 
 const NOTICE_COPY = {
   'invalid-settings': '请检查提供方名称、Base URL、协议与模型；API 密钥可留空。',
@@ -202,12 +202,14 @@ const {
 
 const protocolOptions = PAPER_TASK_PROVIDER_PROTOCOLS.map((value) => ({
   value,
-  label: PROTOCOL_LABELS[value],
+  label: PAPER_TASK_PROVIDER_PROTOCOL_INFO[value].label,
 }))
+
+const protocolInfo = computed(() => PAPER_TASK_PROVIDER_PROTOCOL_INFO[form.protocol])
 
 const protocolLabel = computed(() => {
   const value = status.value?.protocol
-  return value === undefined ? '' : PROTOCOL_LABELS[value]
+  return value === undefined ? '' : PAPER_TASK_PROVIDER_PROTOCOL_INFO[value].label
 })
 
 const noticeText = computed(() => notice.value === null ? null : NOTICE_COPY[notice.value])

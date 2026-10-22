@@ -26,6 +26,11 @@ describe('translation master retrieval', () => {
     })
   })
 
+  it('excludes a coherent old artifact when its present source prose is replaced by a placeholder', () => {
+    const root = fixture({ placeholder: true })
+    expect(readPaperTaskTranslation(TASK_ID, root)).toBeUndefined()
+  })
+
   it('reports stale paragraphs after a source correction without rewriting the master', () => {
     const root = fixture({ stale: true })
     expect(readPaperTaskTranslation(TASK_ID, root)).toMatchObject({
@@ -40,6 +45,11 @@ describe('translation master retrieval', () => {
     expect(readPaperTaskTranslation(TASK_ID, root)).toBeUndefined()
   })
 
+  it('refuses a short master even when its hash was updated but its eligible segments were not', () => {
+    const root = fixture({ manuscript: '测试段' })
+    expect(readPaperTaskTranslation(TASK_ID, root)).toBeUndefined()
+  })
+
   it('returns undefined when no coherent master was retained', () => {
     const root = mkdtempSync(join(tmpdir(), 'paper-task-translation-'))
     roots.push(root)
@@ -47,25 +57,41 @@ describe('translation master retrieval', () => {
   })
 })
 
-function fixture(overrides: { readonly stale?: boolean; readonly masterSha256?: string } = {}): string {
+function fixture(overrides: { readonly stale?: boolean; readonly masterSha256?: string; readonly placeholder?: boolean; readonly manuscript?: string } = {}): string {
   const root = mkdtempSync(join(tmpdir(), 'paper-task-translation-'))
   roots.push(root)
   const directory = join(root, 'drafts', 'translation')
   mkdirSync(directory, { recursive: true })
-  const markdown = '# 主稿\n\n原文段落的自然译文。\n\n![表1](asset:asset-abc)'
+  const markdown = overrides.manuscript ?? (overrides.placeholder === true
+    ? '测试段'
+    : '# 主稿\n\n原文段落的自然译文。\n\n![表1](asset:asset-abc)')
   writeFileSync(join(directory, 'master.md'), markdown)
   writeFileSync(join(directory, 'translation.json'), JSON.stringify({
     version: 1,
     status: 'complete',
     sourceRevision: overrides.stale === true ? 2 : 1,
     masterSha256: overrides.masterSha256 ?? createHash('sha256').update(markdown).digest('hex'),
-    segments: [
-      { index: 0, markdown: '# 主稿\n\n原文段落的自然译文。', stale: overrides.stale === true, dependencies: [{ recordId: 'p1-r1', revision: 1 }] },
-      { index: 1, markdown: '![表1](asset:asset-abc)', stale: false, dependencies: [{ recordId: 'p1-r2', revision: 1 }] },
-    ],
+    segments: overrides.placeholder === true
+      ? [{ index: 0, markdown: '测试段', stale: false, dependencies: [{ recordId: 'p1-r1', revision: 1 }] }]
+      : [
+          { index: 0, markdown: '# 主稿\n\n原文段落的自然译文。', stale: overrides.stale === true, dependencies: [{ recordId: 'p1-r1', revision: 1 }] },
+          { index: 1, markdown: '![表1](asset:asset-abc)', stale: false, dependencies: [{ recordId: 'p1-r2', revision: 1 }] },
+        ],
     terminology: [],
     unresolved: [],
     assets: [{ id: 'asset-abc', recordId: 'p1-r2', kind: 'table', caption: 'Table 1. Outcomes', availability: 'available' }],
+  }))
+  mkdirSync(join(root, 'source-records'), { recursive: true })
+  writeFileSync(join(root, 'source-index.json'), JSON.stringify(['p1-r1', 'p1-r2']))
+  writeFileSync(join(root, 'source-state.json'), JSON.stringify({ status: 'complete' }))
+  writeFileSync(join(root, 'source-records', 'p1-r1.json'), JSON.stringify({
+    record: {
+      id: 'p1-r1', kind: 'body', state: 'present',
+      text: overrides.placeholder === true ? `Original source prose. ${'Detailed results remain in the source. '.repeat(10)}` : '原文段落的自然译文。',
+    }, revision: 1,
+  }))
+  writeFileSync(join(root, 'source-records', 'p1-r2.json'), JSON.stringify({
+    record: { id: 'p1-r2', kind: 'table', state: 'present', text: 'Table 1. Outcomes' }, revision: 1,
   }))
   return root
 }

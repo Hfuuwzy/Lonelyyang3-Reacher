@@ -69,6 +69,10 @@ function result(overrides: Record<string, unknown> = {}): Record<string, unknown
   }
 }
 
+function complete(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return result({ status: 'complete', ...overrides })
+}
+
 describe('paper-review result schema boundary', () => {
   it('rejects an empty span (end equals start)', () => {
     expect(paperSourceSpanSchema.safeParse(span({ start: 5, end: 5 })).success).toBe(false)
@@ -135,6 +139,61 @@ describe('paper-review result schema boundary', () => {
     const missingProvider = { ...result() }
     delete missingProvider.provider
     expect(isPaperReviewTaskResult(missingProvider)).toBe(false)
+  })
+
+  it('accepts a valid complete dossier', () => {
+    expect(isPaperReviewTaskResult(complete())).toBe(true)
+  })
+
+  it.each([0, -1, 1.5, 2])('rejects report finding readerPage %s for either status', (readerPage) => {
+    const invalidCitation = {
+      report: {
+        sections: [{ kind: 'claims', title: 't', findings: [{ statement: 's', source: { heading: 'h', readerPage, quote: 'q' } }] }],
+        gaps: [],
+      },
+    }
+    expect(isPaperReviewTaskResult(result(invalidCitation))).toBe(false)
+    expect(isPaperReviewTaskResult(complete(invalidCitation))).toBe(false)
+  })
+
+  it('rejects a complete result with a null report', () => {
+    expect(isPaperReviewTaskResult(complete({ report: null }))).toBe(false)
+  })
+
+  it('rejects a complete result carrying report or task gaps', () => {
+    const reportGap = { report: { sections: [], gaps: [{ section: 's', reason: 'r' }] } }
+    expect(isPaperReviewTaskResult(complete(reportGap))).toBe(false)
+    const taskGap = { gaps: [{ artifact: 'translation', code: 'c', origin: 'application', unitIds: [], readerPages: [], spans: [], reason: 'r' }] }
+    expect(isPaperReviewTaskResult(complete(taskGap))).toBe(false)
+  })
+
+  it('rejects a complete result with no eligible source units', () => {
+    expect(isPaperReviewTaskResult(complete({ source: { sourceId: 's', pageCount: 1, units: [unit('excluded')] } }))).toBe(false)
+  })
+
+  it('rejects a complete result with unresolved or duplicate source units', () => {
+    expect(isPaperReviewTaskResult(complete({ source: { sourceId: 's', pageCount: 1, units: [unit('paragraph'), unit('unresolved')] } }))).toBe(false)
+    const dupIds = { source: { sourceId: 's', pageCount: 1, units: [{ ...unit('paragraph'), id: 'u-1' }, { ...unit('heading'), id: 'u-1' }] } }
+    expect(isPaperReviewTaskResult(complete(dupIds))).toBe(false)
+  })
+
+  it.each([
+    ['blank', [{ unitId: 'u-1', chinese: '' }]],
+    ['missing', []],
+    ['duplicate', [{ unitId: 'u-1', chinese: 'a' }, { unitId: 'u-1', chinese: 'b' }]],
+    ['ineligible', [{ unitId: 'u-1', chinese: 'a' }, { unitId: 'u-9', chinese: 'b' }]],
+  ] as const)('rejects a complete result with a %s translation pair', (_label, pairs) => {
+    expect(isPaperReviewTaskResult(complete({ translation: { pairs, review: { reviewOf: 'r', status: 'passed', checks: [{ unitId: 'u-1', verdict: 'passed' }] } } }))).toBe(false)
+  })
+
+  it.each([
+    ['non-passed status', 'incomplete', [{ unitId: 'u-1', verdict: 'passed' }]],
+    ['failed verdict', 'passed', [{ unitId: 'u-1', verdict: 'issues' }]],
+    ['missing check', 'passed', []],
+    ['duplicate check', 'passed', [{ unitId: 'u-1', verdict: 'passed' }, { unitId: 'u-1', verdict: 'passed' }]],
+    ['extra check', 'passed', [{ unitId: 'u-1', verdict: 'passed' }, { unitId: 'u-9', verdict: 'passed' }]],
+  ] as const)('rejects a complete result with a %s review', (_label, status, checks) => {
+    expect(isPaperReviewTaskResult(complete({ translation: { pairs: [{ unitId: 'u-1', chinese: '译文' }], review: { reviewOf: 'r', status, checks } } }))).toBe(false)
   })
 })
 

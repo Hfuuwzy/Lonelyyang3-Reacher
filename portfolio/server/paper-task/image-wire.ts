@@ -23,6 +23,7 @@ type JsonObject = Record<string, unknown>
 type ImageWireInspectionOptions = {
   readonly expectedImages?: readonly PreparedPaperTaskImage[]
   readonly limits?: PaperTaskImageWireLimits
+  readonly allowPartialImages?: boolean
 }
 
 const DEFAULT_LIMITS: PaperTaskImageWireLimits = {
@@ -162,6 +163,8 @@ export async function inspectPaperTaskImageRequest(
     if (imageCount > limits.maxImages) return { kind: 'blocked', reason: 'too-many-images' }
     if (encodedBytes > limits.maxBase64ImageBytes || rawBytes > limits.maxRawImageBytes) return { kind: 'blocked', reason: 'aggregate-image-too-large' }
   }
-  if (expectedImages.length > 0 && imageCount !== expectedImages.length) return { kind: 'blocked', reason: imageCount > expectedImages.length ? 'unexpected-image' : 'missing-image' }
+  if (!options.allowPartialImages && expectedImages.length > 0 && imageCount !== expectedImages.length) {
+    return { kind: 'blocked', reason: imageCount > expectedImages.length ? 'unexpected-image' : 'missing-image' }
+  }
   return { kind: 'valid', imageCount, encodedBytes, rawBytes }
 }

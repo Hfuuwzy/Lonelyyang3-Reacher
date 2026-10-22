@@ -36,7 +36,7 @@ export async function respond(request: IncomingMessage, response: ServerResponse
   const chunks: Buffer[] = []
   for await (const chunk of request) chunks.push(Buffer.from(chunk))
   const body = requestSchema.parse(JSON.parse(Buffer.concat(chunks).toString('utf8')))
-  if ((body.tools?.length ?? 0) > 0 && !JSON.stringify(body.tools).includes('claim_evidence')) await peer.translationGate
+  if ((body.tools?.length ?? 0) > 0 && (body.messages ?? []).some(message => message.role === 'user' && contentText(message.content).includes('[paper-task:translation]'))) await peer.translationGate
   const decision = peer.choose(body)
   const id = randomUUID()
   const toolCall = 'tool' in decision

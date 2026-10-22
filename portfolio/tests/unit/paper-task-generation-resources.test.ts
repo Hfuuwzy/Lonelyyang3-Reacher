@@ -1,6 +1,6 @@
 /// <reference types="node" />
 import { afterEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import {
@@ -8,6 +8,7 @@ import {
   readGenerationResource,
   snapshotGenerationResources,
 } from '../../server/paper-task/generation-resources'
+import { loadSkillSnapshot, readSkillResource } from '../../server/paper-task/skill-resources.mjs'
 
 const translationFiles = [
   'SKILL.md', 'references/translation_rules.md', 'references/markdown_rules.md',
@@ -32,6 +33,22 @@ afterEach(() => {
 })
 
 describe('paper task pinned generation resources', () => {
+  it('accepts a different self-contained analysis skill without predefined reference files', () => {
+    const root = mkdtempSync(join(tmpdir(), 'paper-custom-skill-'))
+    roots.push(root)
+    const skill = join(root, 'custom')
+    const task = join(root, 'task')
+    mkdirSync(skill)
+    mkdirSync(task)
+    writeFileSync(join(skill, 'SKILL.md'), '---\nname: custom-analysis\nversion: 9\n---\nRead the document and follow this workflow.')
+
+    const snapshot = snapshotGenerationResources(task, ['deep-reading'], { 'deep-reading': skill })
+
+    expect(snapshot.unavailableBranches).toEqual([])
+    expect(snapshot.resources.map(resource => resource.relativePath)).toEqual(['SKILL.md'])
+    expect(readGenerationResource(task, 'deep-reading:SKILL.md')).toContain('custom-analysis')
+  })
+
   it.skipIf(!installedResourcesAvailable)('loads the installed pinned skills and required vendor/reference files', () => {
     const root = mkdtempSync(join(tmpdir(), 'paper-task-installed-resources-'))
     roots.push(root)
@@ -39,7 +56,7 @@ describe('paper task pinned generation resources', () => {
     mkdirSync(taskRoot)
     const result = snapshotGenerationResources(taskRoot, ['translation', 'deep-reading'])
     expect(result.unavailableBranches).toEqual([])
-    expect(result.resources).toHaveLength(19)
+    expect(result.resources.length).toBeGreaterThanOrEqual(19)
     expect(readGenerationResource(taskRoot, 'translation:vendor:pdfs:SKILL.md'))
       .toBe(readFileSync(join(installedTranslationRoot, 'vendor/pdfs/SKILL.md'), 'utf8'))
     expect(readGenerationResource(taskRoot, 'translation:vendor:docx:SKILL.md'))
@@ -67,21 +84,53 @@ describe('paper task pinned generation resources', () => {
     expect(continuation.resources.find((item) => item.id === skillId)?.sha256).toBe(entry?.sha256)
   })
 
-  it('marks only the selected branch unavailable for a wrong pinned version', () => {
+  it('does not require a particular translation skill identity or version', () => {
     const fixture = makeFixture({ translationVersion: '1.0.9' })
     const result = snapshotGenerationResources(fixture.taskRoot, ['translation', 'deep-reading'], fixture.roots)
-    expect(result.unavailableBranches).toEqual(['translation'])
+    expect(result.unavailableBranches).toEqual([])
     expect(result.resources.filter((resource) => resource.id.startsWith('deep-reading:'))).toHaveLength(11)
-    expect(readGenerationResource(fixture.taskRoot, 'translation:SKILL.md')).toBeUndefined()
+    expect(readGenerationResource(fixture.taskRoot, 'translation:SKILL.md')).toContain('1.0.9')
   })
 
-  it('marks a selected branch unavailable when one required resource is missing', () => {
+  it('discovers available resources rather than requiring a hardcoded vendor filename', () => {
     const fixture = makeFixture()
     rmSync(join(fixture.roots.translation, 'vendor/docx/SKILL.md'))
     const result = snapshotGenerationResources(fixture.taskRoot, ['translation', 'deep-reading'], fixture.roots)
-    expect(result.unavailableBranches).toEqual(['translation'])
+    expect(result.unavailableBranches).toEqual([])
     expect(result.resources.filter((resource) => resource.id.startsWith('deep-reading:'))).toHaveLength(11)
-    expect(result.resources.some((resource) => resource.id === 'translation:SKILL.md')).toBe(false)
+    expect(result.resources.some((resource) => resource.id === 'translation:SKILL.md')).toBe(true)
+    expect(result.resources.some((resource) => resource.id === 'translation:vendor:docx:SKILL.md')).toBe(false)
+  })
+
+  it('resolves nested skill-relative references without a references directory or framework whitelist', () => {
+    const fixture = makeFixture()
+    writeResource(fixture.roots['deep-reading'], 'guides/workflow.md', 'Read ../checklist.md')
+    writeResource(fixture.roots['deep-reading'], 'checklist.md', 'A skill-specific review criterion.')
+    snapshotGenerationResources(fixture.taskRoot, ['deep-reading'], fixture.roots)
+    const resourcesRoot = join(fixture.taskRoot, 'generation-resources')
+
+    expect(readSkillResource({ resourcesRoot, branch: 'deep-reading', path: '../checklist.md', from: 'guides/workflow.md' }).text)
+      .toBe('A skill-specific review criterion.')
+    expect(() => readSkillResource({ resourcesRoot, branch: 'deep-reading', path: '../../outside.md' })).toThrow('escapes')
+    expect(() => readSkillResource({ resourcesRoot, branch: 'translation', path: 'SKILL.md' })).toThrow('unavailable')
+    const snapshot = loadSkillSnapshot(resourcesRoot, 'deep-reading')
+    const entry = snapshot.resources.find(resource => resource.path === 'SKILL.md')
+    if (entry === undefined) throw new Error('entry missing')
+    chmodSync(join(resourcesRoot, 'deep-reading--SKILL.md'), 0o600)
+    writeFileSync(join(resourcesRoot, 'deep-reading--SKILL.md'), 'tampered')
+    expect(() => loadSkillSnapshot(resourcesRoot, 'deep-reading')).toThrow('changed')
+  })
+
+  it('rejects descendant links and oversized resources while allowing the other skill branch', () => {
+    const fixture = makeFixture()
+    const outside = join(fixture.root, 'outside.md')
+    writeFileSync(outside, 'not in the selected skill')
+    symlinkSync(outside, join(fixture.roots['deep-reading'], 'escape.md'))
+    const result = snapshotGenerationResources(fixture.taskRoot, ['translation', 'deep-reading'], fixture.roots)
+    expect(result.unavailableBranches).toEqual(['deep-reading'])
+    const oversized = makeFixture()
+    writeResource(oversized.roots['deep-reading'], 'large.md', 'x'.repeat(512 * 1024 + 1))
+    expect(snapshotGenerationResources(oversized.taskRoot, ['deep-reading'], oversized.roots).unavailableBranches).toEqual(['deep-reading'])
   })
 
   it('does not fail an unselected missing branch', () => {

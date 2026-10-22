@@ -14,7 +14,9 @@ import { join, resolve } from 'node:path'
 import {
   paperTaskSelectionSchema,
   type PaperTaskActionResult,
+  type PaperTaskBranch,
   type PaperTaskEvent,
+  type PaperTaskState,
 } from '../../app/utils/paper-task-contract'
 import type { PaperTaskPdfInput } from './multipart'
 import type { PreparedPaperTaskSource } from './source-acquisition'
@@ -42,10 +44,19 @@ import type { PaperTaskTranslationView } from '../../app/utils/paper-task-transl
 import { readPaperTaskReader } from './reader-access'
 import { readPaperTaskOriginalPdf, readPaperTaskTranslatedPdf } from './pdf-access'
 import type { PaperTaskReaderView } from '../../app/utils/paper-task-reader-contract'
+import {
+  buildPaperTaskFormat,
+  readPaperTaskArtifact,
+  submitPaperTaskFormatInspection,
+  type PaperTaskExportAsset,
+  type PaperTaskExportFormat,
+  type PaperTaskFormatInspection,
+} from './artifact-export'
+import { paperTaskBranchQuality, paperTaskDocumentQuality, type PaperTaskBranchQualityState } from './format-gate'
 
 const SAFE_CREATE_MESSAGE = '任务工作区创建失败，请稍后重试。'
 const SAFE_SELECTION_MESSAGE = '任务分支选择不受支持，请选择翻译、深读或两者。'
-const SAFE_PROVIDER_MESSAGE = '请先配置论文任务的模型提供方、接口协议和模型，再提交生成预览。'
+const SAFE_PROVIDER_MESSAGE = '请先配置论文任务 API 的提供方、接口协议和模型；如服务商要求鉴权，也请填写 API 密钥。'
 
 export interface PaperTaskServiceDependencies {
   readonly runtimeFactory?: PaperTaskRuntimeFactory
@@ -68,6 +79,9 @@ export interface PaperTaskService {
   source(taskId: string): StoredSource | undefined
   translation(taskId: string): PaperTaskTranslationView | undefined
   reader(taskId: string): PaperTaskReaderView | undefined
+  buildArtifacts(taskId: string, branch: PaperTaskBranch, formats: readonly PaperTaskExportFormat[]): Promise<PaperTaskReaderView | undefined>
+  artifact(taskId: string, branch: PaperTaskBranch, format: PaperTaskExportFormat, purpose?: 'final' | 'inspection'): Buffer | undefined
+  inspectArtifact(taskId: string, branch: PaperTaskBranch, format: 'pdf', inspection: PaperTaskFormatInspection): Promise<PaperTaskReaderView | undefined>
   originalPdf(taskId: string): Uint8Array | undefined
   translatedPdf(taskId: string): Uint8Array | undefined
   asset(taskId: string, assetId: string): Uint8Array | undefined
@@ -102,7 +116,7 @@ export function createPaperTaskService(
     const runtimeRoot = join(projectRoot, 'runtime-local', taskId)
     const provider = runtimeFactory === undefined ? getPaperTaskProviderSettings() : undefined
     if (runtimeFactory === undefined && (provider === undefined || provider.providerLabel.length === 0 || provider.baseUrl.length === 0 || provider.model.length === 0)) {
-      return { ok: false, statusCode: 400, message: SAFE_PROVIDER_MESSAGE }
+      return { ok: false, statusCode: 409, message: SAFE_PROVIDER_MESSAGE }
     }
     try {
       createPaperTaskWorkspace(retainedRoot, input.pdf)
@@ -207,6 +221,79 @@ export function createPaperTaskService(
     return readPaperTaskReader(taskId, handle.workspaceRoot, handle.branches, stored)
   }
 
+  function artifactContext(taskId: string, branch: PaperTaskBranch): {
+    readonly handle: PaperTaskHandle
+    readonly markdown: string
+    readonly assets: readonly PaperTaskExportAsset[]
+    readonly masterQuality: PaperTaskBranchQualityState
+  } | undefined {
+    if (deleting.has(taskId)) return undefined
+    const handle = store.get(taskId)
+    if (handle === undefined || !handle.finalized || handle.cleanupFailed || handle.branches[branch] === 'not-selected') return undefined
+    const stored = sourceStore.read(taskId, handle.workspaceRoot)
+    if (stored === undefined) return undefined
+    const view = readPaperTaskReader(taskId, handle.workspaceRoot, handle.branches, stored)
+    const document = view?.documents.find((candidate) => candidate.branch === branch)
+    if (document === undefined) return undefined
+    const masterQuality = paperTaskDocumentQuality(paperTaskBranchQuality(handle.branches[branch]), document.status)
+    const assets = document.assets.map((asset): PaperTaskExportAsset => {
+      const bytes = asset.availability === 'available'
+        ? sourceStore.readAsset(taskId, handle.workspaceRoot, asset.id)
+        : undefined
+      return { id: asset.id, caption: asset.caption, ...(bytes === undefined ? {} : { bytes }) }
+    })
+    return { handle, markdown: document.markdown, assets, masterQuality }
+  }
+
+  async function buildArtifacts(
+    taskId: string,
+    branch: PaperTaskBranch,
+    formats: readonly PaperTaskExportFormat[],
+  ): Promise<PaperTaskReaderView | undefined> {
+    const context = artifactContext(taskId, branch)
+    if (context === undefined || (branch === 'deep-reading' && formats.some((format) => format === 'pdf'))) return undefined
+    for (const format of formats) {
+      try {
+        await buildPaperTaskFormat({
+          root: context.handle.workspaceRoot, branch, format, markdown: context.markdown,
+          assets: context.assets, masterQuality: context.masterQuality,
+        })
+      } catch {
+        // A format's failure is retained independently and must not suppress the other requested formats.
+      }
+    }
+    return reader(taskId)
+  }
+
+  function artifact(
+    taskId: string,
+    branch: PaperTaskBranch,
+    format: PaperTaskExportFormat,
+    purpose: 'final' | 'inspection' = 'final',
+  ): Buffer | undefined {
+    const context = artifactContext(taskId, branch)
+    if (context === undefined) return undefined
+    return readPaperTaskArtifact({
+      root: context.handle.workspaceRoot, branch, format, markdown: context.markdown,
+      masterQuality: context.masterQuality, purpose,
+    })
+  }
+
+  async function inspectArtifact(
+    taskId: string,
+    branch: PaperTaskBranch,
+    format: 'pdf',
+    inspection: PaperTaskFormatInspection,
+  ): Promise<PaperTaskReaderView | undefined> {
+    const context = artifactContext(taskId, branch)
+    if (context === undefined || branch !== 'translation') return undefined
+    await submitPaperTaskFormatInspection({
+      root: context.handle.workspaceRoot, branch, format, markdown: context.markdown,
+      masterQuality: context.masterQuality, inspection,
+    })
+    return reader(taskId)
+  }
+
   function originalPdf(taskId: string): Uint8Array | undefined {
     if (deleting.has(taskId)) return undefined
     const handle = store.get(taskId)
@@ -234,7 +321,7 @@ export function createPaperTaskService(
     return correctPaperTaskSource(sourceStore, taskId, handle.workspaceRoot, correction)
   }
 
-  return { submit, cancel, remove, source, translation, reader, originalPdf, translatedPdf, asset, correctSource }
+  return { submit, cancel, remove, source, translation, reader, buildArtifacts, artifact, inspectArtifact, originalPdf, translatedPdf, asset, correctSource }
 }
 
 /**

@@ -5,6 +5,10 @@ const INFERENCE_CUE = /\binference\b|\b(?:we infer|our interpretation)\b|推论|
 const CONFIRMATION_CUE = /confirmation|uncompleted|not verified|unverified|incomplete|待确认|需确认|确认事项|未完成|未经验证|尚未核实/iu
 const VISUAL_KINDS = new Set(['table', 'formula', 'algorithm'])
 
+export function hasChineseProse(markdown) {
+  return typeof markdown === 'string' && (markdown.match(/[\u3400-\u9fff]/gu)?.length ?? 0) >= 20
+}
+
 export function inspectDeepReadingReport(args, source) {
   const issues = []
   const addIssue = (code, message, recordIds = []) => {
@@ -17,6 +21,7 @@ export function inspectDeepReadingReport(args, source) {
     || reasons.some((reason) => typeof reason !== 'string' || reason.trim().length === 0 || reason.length > 2000)) throw new Error('deep-reading uncompleted reasons are invalid')
   const byId = new Map(source.records.map((stored) => [stored.record.id, stored]))
   if ([...byId.keys()].some((id) => markdown.includes(id))) addIssue('source-id-exposed', 'reader report must not expose source record identifiers')
+  if (!hasChineseProse(markdown)) addIssue('report-language', 'deep-reading report must use Simplified Chinese for reader-facing prose')
   const evidenceClaims = []
   for (const claim of claims) {
     if (claim === null || typeof claim !== 'object' || typeof claim.passage !== 'string'

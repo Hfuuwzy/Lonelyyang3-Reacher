@@ -12,6 +12,7 @@ const SFC_PATHS = [
   'app/components/prototype/PaperTaskApiSettings.vue',
   'app/components/prototype/PaperTaskTranslationPreview.vue',
   'app/components/prototype/PaperTaskReader.vue',
+  'app/components/prototype/PaperTaskExportActions.vue',
 ] as const
 
 describe('paper-task SFC compilation', () => {

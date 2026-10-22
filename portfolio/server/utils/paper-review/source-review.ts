@@ -34,7 +34,26 @@ const checkSchema = z.object({
   classification: z.enum(['passed', 'issues']), translation: z.enum(['passed', 'issues', 'not-applicable']),
 }).strict()
 
-export function validateSourceReview(frozen: FrozenPaperTranslation, raw: string): {
+function reviewGap(frozen: FrozenPaperTranslation, unitId: string, code: string, origin: PaperReviewTaskGap['origin']): PaperReviewTaskGap {
+  const unit = frozen.source.units.find((candidate) => candidate.id === unitId)
+  if (unit === undefined) {
+    return artifactGap('source-review', code)
+  }
+  return { ...unitGap(unit, 'source-review', code), origin }
+}
+
+/**
+ * Validate one bounded source-review batch. The frozen global source/pairs
+ * snapshot is never sliced; each request carries the same `reviewOf` digest and
+ * only the expected batch ids. Checks for unknown, out-of-batch, duplicate, or
+ * wrong-kind units are rejected and localized. Coverage is validated only
+ * against the supplied batch ids.
+ */
+export function validateSourceReviewBatch(
+  frozen: FrozenPaperTranslation,
+  batchIds: readonly string[],
+  raw: string,
+): {
   readonly review: PaperSourceReview
   readonly gaps: readonly PaperReviewTaskGap[]
 } {
@@ -42,28 +61,60 @@ export function validateSourceReview(frozen: FrozenPaperTranslation, raw: string
   const gaps: PaperReviewTaskGap[] = []
   const fingerprintMatches = parsed.success && parsed.data.reviewOf === frozen.reviewOf
     && frozen.reviewOf === sourceDigest({ source: frozen.source, pairs: frozen.pairs })
-  if (!fingerprintMatches) gaps.push(artifactGap('source-review', 'review-fingerprint-mismatch'))
+  if (!fingerprintMatches) {
+    gaps.push(artifactGap('source-review', 'review-fingerprint-mismatch'))
+  }
+  const expected = new Set(batchIds)
   const byId = new Map<string, z.infer<typeof checkSchema>[]>()
   for (const value of parsed.success ? parsed.data.checks : []) {
     const check = checkSchema.safeParse(value)
-    if (!check.success) { gaps.push(artifactGap('source-review', 'invalid-check')); continue }
-    if (!frozen.source.units.some(unit => unit.id === check.data.unitId)) { gaps.push(artifactGap('source-review', 'unknown-check')); continue }
+    if (!check.success) {
+      gaps.push(artifactGap('source-review', 'invalid-check'))
+      continue
+    }
+    const unit = frozen.source.units.find((candidate) => candidate.id === check.data.unitId)
+    if (unit === undefined || !expected.has(check.data.unitId)) {
+      gaps.push(artifactGap('source-review', 'out-of-batch-check'))
+      continue
+    }
     byId.set(check.data.unitId, [...(byId.get(check.data.unitId) ?? []), check.data])
   }
-  const checks: PaperSourceReview['checks'] = frozen.source.units.map(unit => {
-    const matches = byId.get(unit.id) ?? []
+
+  const checks: { readonly unitId: string; readonly verdict: 'passed' | 'issues' }[] = []
+  let anyIssue = false
+  const orderedIds = frozen.source.units.filter((unit) => expected.has(unit.id)).map((unit) => unit.id)
+  for (const unitId of orderedIds) {
+    const unit = frozen.source.units.find((candidate) => candidate.id === unitId)!
+    const matches = byId.get(unitId) ?? []
     const check = matches[0]
-    const pairs = frozen.pairs.filter(pair => pair.unitId === unit.id)
+    const pairs = frozen.pairs.filter(pair => pair.unitId === unitId)
     const translationPasses = isTranslationEligible(unit)
       ? pairs.length === 1 && Boolean(pairs[0]?.chinese?.trim()) && check?.translation === 'passed'
       : pairs.length === 0 && check?.translation === 'not-applicable'
     const passed = fingerprintMatches && matches.length === 1 && check?.kind === unit.kind
       && check.classification === 'passed' && translationPasses && unit.kind !== 'unresolved'
     if (!passed) {
-      const code = matches.length === 0 ? 'missing-check' : matches.length > 1 ? 'duplicate-check' : 'review-issues'
-      gaps.push({ ...unitGap(unit, 'source-review', code), origin: code === 'review-issues' && fingerprintMatches ? 'model-review' : 'application' })
+      anyIssue = true
+      const code = matches.length === 0 ? 'missing-check' : matches.length > 1 ? 'duplicate-check' : unit.kind === 'unresolved' ? 'unresolved-unit' : 'review-issues'
+      const origin: PaperReviewTaskGap['origin'] = code === 'review-issues' && fingerprintMatches ? 'model-review' : 'application'
+      gaps.push(reviewGap(frozen, unitId, code, origin))
     }
-    return { unitId: unit.id, verdict: passed ? 'passed' : 'issues' }
-  })
-  return { review: { reviewOf: frozen.reviewOf, status: gaps.length === 0 && checks.length > 0 ? 'passed' : 'incomplete', checks }, gaps }
+    checks.push({ unitId, verdict: passed ? 'passed' : 'issues' })
+  }
+
+  return {
+    review: {
+      reviewOf: frozen.reviewOf,
+      status: !anyIssue && fingerprintMatches && checks.length > 0 && gaps.length === 0 ? 'passed' : 'incomplete',
+      checks,
+    },
+    gaps,
+  }
+}
+
+export function validateSourceReview(frozen: FrozenPaperTranslation, raw: string): {
+  readonly review: PaperSourceReview
+  readonly gaps: readonly PaperReviewTaskGap[]
+} {
+  return validateSourceReviewBatch(frozen, frozen.source.units.map((unit) => unit.id), raw)
 }

@@ -1,3 +1,4 @@
 portfolio/tests/fixtures/paper-review-sample.pdf -diff
 portfolio/tests/fixtures/paper-review-29.pdf -diff
 portfolio/tests/fixtures/paper-task-source-fixture.pdf -diff -text
+portfolio/tests/fixtures/paper-review-columns.pdf -diff -text

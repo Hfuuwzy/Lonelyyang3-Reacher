@@ -10,8 +10,10 @@ export interface PaperReviewStageStep {
 export const PAPER_REVIEW_STAGE_STEPS: readonly PaperReviewStageStep[] = [
   { stage: 'validating', label: '校验', ordinal: '一' },
   { stage: 'extracting', label: '抽取', ordinal: '二' },
-  { stage: 'analyzing', label: '分析', ordinal: '三' },
-  { stage: 'verifying', label: '核验', ordinal: '四' },
+  { stage: 'inventorying', label: '清点', ordinal: '三' },
+  { stage: 'analyzing', label: '分析', ordinal: '四' },
+  { stage: 'translating', label: '翻译', ordinal: '五' },
+  { stage: 'verifying', label: '核验', ordinal: '六' },
 ]
 
 export function paperReviewStageLabel(stage: PaperReviewStage): string {

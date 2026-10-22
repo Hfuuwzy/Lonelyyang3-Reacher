@@ -4,10 +4,18 @@
  *
  * These schemas replace the hand-written #29 guards in `paper-review-contract.ts`
  * with Zod at the trust boundary, while preserving the wire shape and accepted
- * unknown properties (`passthrough`) of the previous guards exactly. No defaults,
- * coercions, or extra minimums are introduced beyond the invariants the old
- * guards already enforced: nonempty valid spans, `end > start`, positive reader
- * pages, and page-count bounds.
+ * unknown properties (`passthrough`) of the previous guards exactly. No defaults
+ * or coercions are introduced beyond the invariants the old guards already
+ * enforced — nonempty valid spans, `end > start`, positive reader pages, and
+ * page-count bounds — plus two boundary additions:
+ *   - report findings must cite a `readerPage` within `1..source.pageCount` for
+ *     either status, and
+ *   - a `complete` status must agree with the server's completion derivation in
+ *     `pipeline-outcomes.ts`: a non-null report with no report/task gaps, a
+ *     nonempty eligible source-unit set with unique ids and no unresolved units,
+ *     exactly one nonblank translation pair per eligible unit (no extra,
+ *     duplicate, or ineligible pairs), and exactly one passed review check per
+ *     source unit (no extra, duplicate, or failed checks).
  *
  * The nested report inside a task result reuses the existing #27 pure guards
  * (`isPaperReviewSection` / `isPaperReviewGap`) from `paper-review-contract.ts`.
@@ -16,6 +24,7 @@
  */
 
 import { z } from 'zod'
+import { isTranslationEligible } from './paper-review-task-contract'
 import type { PaperReviewGap, PaperReviewSection } from './paper-review-contract'
 import type {
   PaperReviewTaskGap,
@@ -137,5 +146,99 @@ export function createPaperReviewTaskResultSchema(guards: PaperReviewTaskReportG
       review: paperSourceReviewSchema,
     }).passthrough(),
     gaps: z.array(paperReviewTaskGapSchema),
-  }).passthrough()
+  }).passthrough().superRefine((result, ctx) => {
+    const { pageCount } = result.source
+    if (result.report !== null && Array.isArray(result.report.sections)) {
+      result.report.sections.forEach((section, sectionIndex) => {
+        if (!Array.isArray(section.findings)) {
+          return
+        }
+        section.findings.forEach((finding, findingIndex) => {
+          if (finding.source.readerPage > pageCount) {
+            ctx.addIssue({
+              code: 'custom',
+              message: 'report finding readerPage exceeds pageCount',
+              path: ['report', 'sections', sectionIndex, 'findings', findingIndex, 'source', 'readerPage'],
+            })
+          }
+        })
+      })
+    }
+
+    if (result.status !== 'complete') {
+      return
+    }
+
+    if (result.report === null) {
+      ctx.addIssue({ code: 'custom', message: 'complete result requires a non-null report' })
+      return
+    }
+    if (result.report.gaps.length > 0) {
+      ctx.addIssue({ code: 'custom', message: 'complete result requires no report gaps' })
+    }
+    if (result.gaps.length > 0) {
+      ctx.addIssue({ code: 'custom', message: 'complete result requires no task gaps' })
+    }
+    if (result.source.units.filter(isTranslationEligible).length === 0) {
+      ctx.addIssue({ code: 'custom', message: 'complete result requires at least one eligible source unit' })
+    }
+    if (!sourceUnitIdsAreUnique(result.source.units)) {
+      ctx.addIssue({ code: 'custom', message: 'complete result requires unique source unit ids' })
+    }
+    if (!hasNoUnresolvedUnits(result.source.units)) {
+      ctx.addIssue({ code: 'custom', message: 'complete result requires no unresolved source units' })
+    }
+    if (!everyEligibleUnitHasOneNonblankPair(result.source.units, result.translation.pairs)) {
+      ctx.addIssue({ code: 'custom', message: 'complete result requires exactly one nonblank translation pair per eligible unit' })
+    }
+    if (result.translation.review.status !== 'passed'
+      || !everySourceUnitHasOnePassedCheck(result.source.units, result.translation.review.checks)) {
+      ctx.addIssue({ code: 'custom', message: 'complete result requires exactly one passed review check per source unit' })
+    }
+  })
+}
+
+function sourceUnitIdsAreUnique(units: readonly PaperSourceUnit[]): boolean {
+  return new Set(units.map((unit) => unit.id)).size === units.length
+}
+
+function hasNoUnresolvedUnits(units: readonly PaperSourceUnit[]): boolean {
+  return units.every((unit) => unit.kind !== 'unresolved')
+}
+
+/** Every eligible unit has exactly one nonblank pair, with no extra, duplicate,
+ * or ineligible pairs (mirrors `everyEligibleUnitHasOneNonblankPair`). */
+function everyEligibleUnitHasOneNonblankPair(
+  units: readonly PaperSourceUnit[],
+  pairs: readonly PaperTranslationPair[],
+): boolean {
+  const eligibleIds = new Set(units.filter(isTranslationEligible).map((unit) => unit.id))
+  const seen = new Set<string>()
+  for (const pair of pairs) {
+    if (!eligibleIds.has(pair.unitId) || seen.has(pair.unitId)) {
+      return false
+    }
+    seen.add(pair.unitId)
+    if (pair.chinese === null || pair.chinese.trim() === '') {
+      return false
+    }
+  }
+  return seen.size === eligibleIds.size
+}
+
+/** Every source unit has exactly one passed check, with no extra, duplicate, or
+ * failed checks. */
+function everySourceUnitHasOnePassedCheck(
+  units: readonly PaperSourceUnit[],
+  checks: PaperSourceReview['checks'],
+): boolean {
+  const unitIds = new Set(units.map((unit) => unit.id))
+  const seen = new Set<string>()
+  for (const check of checks) {
+    if (check.verdict !== 'passed' || !unitIds.has(check.unitId) || seen.has(check.unitId)) {
+      return false
+    }
+    seen.add(check.unitId)
+  }
+  return seen.size === unitIds.size
 }

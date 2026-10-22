@@ -71,8 +71,16 @@ export function verifyPaperReviewSource(
 
   let headingUnlocated = false
   if (source.heading.trim() === '') {
-    // An empty heading is accepted (never invented) but recorded as unlocated.
-    headingUnlocated = true
+    // An empty heading is accepted (never invented) but recorded as unlocated
+    // only when a structural heading genuinely exists at the quote that the
+    // model failed to supply; a truly headingless quote is honest.
+    headingUnlocated = occurrences.some(
+      (lineIndex) =>
+        previousStructuralHeading(context.headings, {
+          readerPage: source.readerPage,
+          lineIndex,
+        }) !== undefined,
+    )
   } else {
     // A non-empty heading must be the exact nearest preceding structural heading
     // at one of the quote's literal occurrences; future/fabricated/superseded

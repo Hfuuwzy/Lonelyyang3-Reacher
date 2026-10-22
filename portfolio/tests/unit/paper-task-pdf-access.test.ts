@@ -87,16 +87,21 @@ function fixture(overrides: {
     assets: [],
     unresolved: [],
   }))
+  const pdf = overrides.pdf ?? PDF
   writeFileSync(join(translation, 'pdf-format.json'), JSON.stringify({
+    version: 1,
+    branch: 'translation',
     format: 'pdf',
     build: overrides.build ?? 'built',
     sourceMasterSha256: sha,
     artifactMasterSha256: overrides.artifactMasterSha256 ?? sha,
+    artifactSha256: createHash('sha256').update(pdf).digest('hex'),
+    boundaryCheck: { method: 'ordered-normalized-text-extraction', passed: true, sourceMasterSha256: sha, sourceBlocks: 1, matchedBlocks: 1 },
     expectedPageCount: 1,
-    pages: overrides.pages ?? [{ page: 1, status: overrides.pageStatus ?? 'passed' }],
+    pages: overrides.pages ?? [{ page: 1, status: overrides.pageStatus ?? 'passed', expected: '译文正文完整。', observed: '译文正文完整。', evidence: '实际检查第 1 页。' }],
   }))
   if (overrides.writePdf !== false) {
-    writeFileSync(join(translation, 'translated.pdf'), overrides.pdf ?? PDF)
+    writeFileSync(join(translation, 'translated.pdf'), pdf)
   }
   if (overrides.writeOriginal !== false) {
     writeFileSync(join(root, 'original.pdf'), PDF)
