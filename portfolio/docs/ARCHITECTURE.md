@@ -50,6 +50,7 @@ flowchart TD
 | `app/app.vue` | 根组件；设置随 locale 变化的 `html[lang]`。 |
 | `app/layouts/default.vue` | 全站外壳和导航开关状态。 |
 | `app/pages/` | Nuxt 文件路由页面。 |
+| `app/pages/prototype/paper-reader.vue` | 开发期合成阅读原型，默认专注布局；不接真实论文任务。 |
 | `app/components/layout/` | 右轨、抽屉和页脚。 |
 | `app/components/sections/` | 首页主视觉、文章流、竖排分类。 |
 | `app/components/content/` | 页面标题、文章行、正文和分类落地页。 |
@@ -81,6 +82,8 @@ app/app.vue
 `default.vue` 持有唯一的 `navOpen` 响应式状态，以及共享的 `home-intro-settled` 状态。右轨触发开关，抽屉和导航链接触发关闭；监听 `route.fullPath` 可确保路由跳转后抽屉不会残留。首页进入期间，内容壳仍保留右轨 gutter，但右轨和抽屉仅在 `home-intro-settled` 后挂载；其他页面始终维持常规导航行为。
 
 内容区通过右侧 padding 为固定导航轨保留空间：桌面、平板、手机分别对应 80px、64px、56px。抽屉覆盖内容而不让主内容重排。
+
+`/prototype/paper-reader` 是有意不使用默认外壳的阅读原型（`layout: false`），由自身紧凑工具栏与可独立滚动的章节目录提供阅读导航。受控内容与合成 PDF 夹具位于 `app/components/prototype/paper-reader-fixture.ts`，局部样式位于同目录 `paper-reader.css`；可复用的原型文档操作组件是 `PaperReaderDocuments.vue`。现有生产 `pages:extend` 钩子排除该路由；此页面不替换 `paper-review` 的真实结果渲染与任务会话。
 
 ## 5. 导航与抽屉
 

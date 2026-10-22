@@ -39,6 +39,12 @@ An unfiltered `npm run test:e2e` runs the full suite; use it only when the full 
 
 There is no standalone `typecheck` script configured for `portfolio/`; `npm run dev` and `npm run build` are the available local commands.
 
+### Reading prototype
+
+The synthetic paper reader lives at `portfolio/app/pages/prototype/paper-reader.vue`. Run `npm run dev` from `portfolio/` and open `/prototype/paper-reader`; focus layout C is the default. Prototype routes are excluded from production builds. See [the prototype guide](portfolio/docs/paper-reader-prototype.md) for comparison layouts, fixture controls, and limits.
+
+The task-result C reader is `portfolio/app/components/prototype/PaperTaskReader.vue`; `/prototype/paper-task-reader-fixture` renders it with an untrusted-Markdown sample for bounded manual checks. Real results are opened from `/prototype/paper-task` after a task reaches its result phase.
+
 ### Recorded E2E baseline (issue #2)
 
 At issue #2 closure, the recorded E2E baseline was **40 passing, 11 accepted failures**. The 11 failures were stale page-structure/behavior contracts and were accepted for that baseline; they are historical context, not a requirement to run E2E for every change.
@@ -51,4 +57,4 @@ At issue #2 closure, the recorded E2E baseline was **40 passing, 11 accepted fai
 
 - Tracked domain vocabulary: `CONTEXT.md`
 - Tracked decisions: `docs/adr/` (`0001-repo-root-and-baseline-restructure.md`, `0002-agent-infrastructure-out-of-repo.md`)
-- Issues/specs: GitHub issues on `Hfuuwzy/MyWorks`, managed with the `gh` CLI (see `docs/agents/issue-tracker.md`).
+- Issues/specs: GitHub issues in `Hfuuwzy/Lonelyyang3-Reacher`, managed with the `gh` CLI (see `docs/agents/issue-tracker.md`).

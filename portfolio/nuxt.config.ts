@@ -1,4 +1,10 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
+import { randomBytes } from 'node:crypto'
+import {
+  createDevPeerParentHandler,
+  PAPER_REVIEW_DEV_PEER_KEY_ENV,
+} from './server/utils/paper-review/dev-peer'
+
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: false },
@@ -63,5 +69,50 @@ export default defineNuxtConfig({
     '/': { prerender: true },
     '/blog': { swr: 3600 },
     '/projects/**': { swr: 3600 },
+  },
+
+  hooks: {
+    'pages:extend'(pages) {
+      if (process.env.NODE_ENV !== 'production') {
+        return
+      }
+
+      const prototypePages = pages.filter((page) => {
+        const path = page.path ?? ''
+        const file = (page.file ?? '').replace(/\\/g, '/')
+        return path.startsWith('/prototype/') || /\/prototype\//.test(file)
+      })
+
+      for (const page of prototypePages) {
+        const index = pages.indexOf(page)
+        if (index >= 0) {
+          pages.splice(index, 1)
+        }
+      }
+    },
+
+    'nitro:init'(nitro) {
+      if (!nitro.options.dev) {
+        return
+      }
+
+      // Per-process, dev-only attestation key. Stored privately in the
+      // environment (inherited by the worker) before any worker is created;
+      // never serialized into config or exposed to a browser.
+      const key = randomBytes(32).toString('hex')
+      process.env[PAPER_REVIEW_DEV_PEER_KEY_ENV] = key
+
+      // Register the parent attestation handler FIRST so it runs before the
+      // worker proxy in the dev server.
+      nitro.options.devHandlers.unshift({
+        handler: createDevPeerParentHandler(key),
+      })
+
+      nitro.hooks.hook('close', () => {
+        if (process.env[PAPER_REVIEW_DEV_PEER_KEY_ENV] === key) {
+          delete process.env[PAPER_REVIEW_DEV_PEER_KEY_ENV]
+        }
+      })
+    },
   },
 })

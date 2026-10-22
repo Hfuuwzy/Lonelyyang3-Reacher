@@ -7,14 +7,21 @@
 - Planned sibling: `backend/`.
 - Governance docs: `README.md`, `CONTEXT.md`, `docs/adr/`, `docs/agents/`, `docs/browser-automation-runbook.md`.
 - Machine-local agent tooling (`.opencode/`, `.omo/`, `.codegraph/`, `.playwright-mcp/`) is ignored by `.gitignore` and never committed.
+- Save generated handoff/compaction documents in this workspace's `.opencode/handoff/` directory, not an OS temp or user-profile directory. Keep them local and unstaged; do not commit, push, or upload them unless the user explicitly asks.
 - Keep root-level screenshots, browser captures, and retired plans/specs out of the repo; keep the frontend lockfile under `portfolio/`.
 
 ## Test execution
 
+- Reuse an existing local development server for verification. Do not launch unattended long-lived services with `Start-Process`; if a new server is necessary, use a bounded foreground workflow with an explicit completion signal and guaranteed cleanup.
 - Choose the smallest relevant checks for changed behavior; tests are not a mandatory end-of-task ritual.
 - `npm test` and `npm run test:unit` run unit tests only.
 - Playwright E2E is opt-in: run it only when the user explicitly asks for E2E/Playwright tests. When requested, select only affected spec files or cases with a path or title filter; run the unfiltered full suite only when the user explicitly asks for the full E2E suite.
 - Add or update focused tests when a behavior needs a maintained regression guard. Keep distinct useful coverage; retire or consolidate cases only when the behavior is removed or coverage is genuinely redundant, not merely because a test passed once.
+
+## Development model calls
+
+- The user authorizes agents to call models configured in `portfolio/.env` and `portfolio/.env.test.local` as needed to implement, debug, and verify this project's features, including paid calls. Do not ask again solely for permission to use these configured models or incur their API costs.
+- Load credentials directly through local application or test runners. Keep credentials out of tool output, logs, retained task materials, documentation, and commits; report sanitized results and clean up owned runtime processes after verification.
 
 ## Browser Automation
 
@@ -35,7 +42,7 @@
 
 ### Issue tracker
 
-Issues and specs live as GitHub issues on `Hfuuwzy/MyWorks`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues and specs live as GitHub issues in `Hfuuwzy/Lonelyyang3-Reacher`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md` for tracker operations and repository identity.
 
 ### Triage labels
 

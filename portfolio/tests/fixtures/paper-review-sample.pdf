@@ -1,0 +1,220 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 5 0 R 7 0 R] /Count 3 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 9 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 386 >>
+stream
+BT
+/F1 12 Tf
+72 760 Td (1 Introduction) Tj
+ET
+BT
+/F1 12 Tf
+72 736 Td (Portable Document Format files preserve layout for print.) Tj
+ET
+BT
+/F1 12 Tf
+72 712 Td (This synthetic fixture is not a real academic paper.) Tj
+ET
+BT
+/F1 12 Tf
+72 688 Td (The quick brown fox jumps over the lazy dog.) Tj
+ET
+BT
+/F1 12 Tf
+72 664 Td (Precomputed baselines anchor the expected extraction values.) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 6 0 R /Resources << /Font << /F1 9 0 R >> >> >>
+endobj
+6 0 obj
+<< /Length 278 >>
+stream
+BT
+/F1 12 Tf
+72 760 Td (2 Methods) Tj
+ET
+BT
+/F1 12 Tf
+72 736 Td (We measured response latency with a calibrated timer.) Tj
+ET
+BT
+/F1 12 Tf
+72 712 Td (Sample sizes were determined a priori.) Tj
+ET
+BT
+/F1 12 Tf
+72 688 Td (Each trial ran in full isolation from prior trials.) Tj
+ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 8 0 R /Resources << /Font << /F1 9 0 R >> >> >>
+endobj
+8 0 obj
+<< /Length 199 >>
+stream
+BT
+/F1 12 Tf
+72 760 Td (3 Results) Tj
+ET
+BT
+/F1 12 Tf
+72 736 Td (Accuracy improved from 71.2% to 92.4% after tuning.) Tj
+ET
+BT
+/F1 12 Tf
+72 712 Td (A shorter quote spans the sentence boundary.) Tj
+ET
+endstream
+endobj
+9 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /FixtureSans /Encoding /WinAnsiEncoding /FirstChar 32 /LastChar 126 /Widths [520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520] /FontDescriptor 10 0 R /ToUnicode 11 0 R >>
+endobj
+10 0 obj
+<< /Type /FontDescriptor /FontName /FixtureSans /Flags 4 /FontBBox [0 -250 1000 900] /ItalicAngle 0 /Ascent 900 /Descent -250 /CapHeight 700 /StemV 80 /MissingWidth 520 >>
+endobj
+11 0 obj
+<< /Length 1461 >>
+stream
+/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def
+/CMapName /Adobe-Identity-UCS def
+/CMapType 2 def
+1 begincodespacerange
+<00> <ff>
+endcodespacerange
+95 beginbfchar
+<20> <0020>
+<21> <0021>
+<22> <0022>
+<23> <0023>
+<24> <0024>
+<25> <0025>
+<26> <0026>
+<27> <0027>
+<28> <0028>
+<29> <0029>
+<2a> <002a>
+<2b> <002b>
+<2c> <002c>
+<2d> <002d>
+<2e> <002e>
+<2f> <002f>
+<30> <0030>
+<31> <0031>
+<32> <0032>
+<33> <0033>
+<34> <0034>
+<35> <0035>
+<36> <0036>
+<37> <0037>
+<38> <0038>
+<39> <0039>
+<3a> <003a>
+<3b> <003b>
+<3c> <003c>
+<3d> <003d>
+<3e> <003e>
+<3f> <003f>
+<40> <0040>
+<41> <0041>
+<42> <0042>
+<43> <0043>
+<44> <0044>
+<45> <0045>
+<46> <0046>
+<47> <0047>
+<48> <0048>
+<49> <0049>
+<4a> <004a>
+<4b> <004b>
+<4c> <004c>
+<4d> <004d>
+<4e> <004e>
+<4f> <004f>
+<50> <0050>
+<51> <0051>
+<52> <0052>
+<53> <0053>
+<54> <0054>
+<55> <0055>
+<56> <0056>
+<57> <0057>
+<58> <0058>
+<59> <0059>
+<5a> <005a>
+<5b> <005b>
+<5c> <005c>
+<5d> <005d>
+<5e> <005e>
+<5f> <005f>
+<60> <0060>
+<61> <0061>
+<62> <0062>
+<63> <0063>
+<64> <0064>
+<65> <0065>
+<66> <0066>
+<67> <0067>
+<68> <0068>
+<69> <0069>
+<6a> <006a>
+<6b> <006b>
+<6c> <006c>
+<6d> <006d>
+<6e> <006e>
+<6f> <006f>
+<70> <0070>
+<71> <0071>
+<72> <0072>
+<73> <0073>
+<74> <0074>
+<75> <0075>
+<76> <0076>
+<77> <0077>
+<78> <0078>
+<79> <0079>
+<7a> <007a>
+<7b> <007b>
+<7c> <007c>
+<7d> <007d>
+<7e> <007e>
+endbfchar
+endcmap
+CMapName currentdict /CMap defineresource pop
+end
+end
+
+endstream
+endobj
+xref
+0 12
+0000000000 65535 f 
+0000000000 00000 n 
+0000000049 00000 n 
+0000000118 00000 n 
+0000000244 00000 n 
+0000000681 00000 n 
+0000000807 00000 n 
+0000001136 00000 n 
+0000001262 00000 n 
+0000001512 00000 n 
+0000002070 00000 n 
+0000002258 00000 n 
+trailer
+<< /Size 12 /Root 1 0 R >>
+startxref
+3772
+%%EOF

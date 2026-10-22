@@ -1,0 +1,296 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 2422 >>
+stream
+BT
+/F1 12 Tf
+72 760 Td (Two-Column Academic Layout Reconstruction) Tj
+ET
+BT
+/F1 12 Tf
+72 736 Td (Alice Example, Bob Sample, Carol Test) Tj
+ET
+BT
+/F1 12 Tf
+72 712 Td (Abstract) Tj
+ET
+BT
+/F1 12 Tf
+72 688 Td (We describe a synthetic two-column PDF fixture used to exercise reading-order) Tj
+ET
+BT
+/F1 12 Tf
+72 664 Td (reconstruction from raw coordinates. The title and abstract are full width,) Tj
+ET
+BT
+/F1 12 Tf
+72 640 Td (while the body below splits into two columns that share their baselines.) Tj
+ET
+BT
+/F1 12 Tf
+72 616 Td (Keywords: pdf extraction; two-column layout; reading order) Tj
+ET
+BT
+/F1 12 Tf
+72 592 Td (1 Introduction) Tj
+ET
+BT
+/F1 12 Tf
+72 568 Td (Two-column text keeps lines short) Tj
+ET
+BT
+/F1 12 Tf
+340 568 Td (Right-column prose is independent) Tj
+ET
+BT
+/F1 12 Tf
+72 544 Td (and readable; both sides share a) Tj
+ET
+BT
+/F1 12 Tf
+340 544 Td (text that nevertheless shares each) Tj
+ET
+BT
+/F1 12 Tf
+72 520 Td (common baseline on every wrapped) Tj
+ET
+BT
+/F1 12 Tf
+340 520 Td (baseline with the left column rows,) Tj
+ET
+BT
+/F1 12 Tf
+72 496 Td (row, so a horizontal scan crosses) Tj
+ET
+BT
+/F1 12 Tf
+340 496 Td (letting the extractor group them by) Tj
+ET
+BT
+/F1 12 Tf
+72 472 Td (both columns in a single band of) Tj
+ET
+BT
+/F1 12 Tf
+340 472 Td (the vertical coordinate alone.) Tj
+ET
+BT
+/F1 12 Tf
+72 448 Td (Figure 1. Baseline-aligned rows) Tj
+ET
+BT
+/F1 12 Tf
+340 448 Td (Captions are ordinary text and need) Tj
+ET
+BT
+/F1 12 Tf
+72 424 Td (ease reading-order recovery from) Tj
+ET
+BT
+/F1 12 Tf
+340 424 Td (no special handling to be located.) Tj
+ET
+BT
+/F1 12 Tf
+72 400 Td (Table 1. Extraction accuracy) Tj
+ET
+BT
+/F1 12 Tf
+340 400 Td (Table rows use whitespace, not pipes,) Tj
+ET
+BT
+/F1 12 Tf
+72 376 Td (Method    Accuracy) Tj
+ET
+BT
+/F1 12 Tf
+340 376 Td (so column splits come from x values.) Tj
+ET
+BT
+/F1 12 Tf
+72 352 Td (Baseline  92.4%) Tj
+ET
+BT
+/F1 12 Tf
+340 352 Td (Numbers stay exact and untranslated.) Tj
+ET
+BT
+/F1 12 Tf
+72 328 Td (Naive     71.2%) Tj
+ET
+BT
+/F1 12 Tf
+340 328 Td (References and the appendix appear) Tj
+ET
+BT
+/F1 12 Tf
+72 304 Td (E = m c^2) Tj
+ET
+BT
+/F1 12 Tf
+340 304 Td (after the columns as full-width bands.) Tj
+ET
+BT
+/F1 12 Tf
+72 280 Td (References) Tj
+ET
+BT
+/F1 12 Tf
+72 256 Td ([1] A. Example, B. Sample, C. Test. Reading Order from Coordinates. 2024.) Tj
+ET
+BT
+/F1 12 Tf
+72 232 Td (Appendix A) Tj
+ET
+BT
+/F1 12 Tf
+72 208 Td (Appendix content is ordinary text with no special markup.) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /FixtureSans /Encoding /WinAnsiEncoding /FirstChar 32 /LastChar 126 /Widths [520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520 520] /FontDescriptor 6 0 R /ToUnicode 7 0 R >>
+endobj
+6 0 obj
+<< /Type /FontDescriptor /FontName /FixtureSans /Flags 4 /FontBBox [0 -250 1000 900] /ItalicAngle 0 /Ascent 900 /Descent -250 /CapHeight 700 /StemV 80 /MissingWidth 520 >>
+endobj
+7 0 obj
+<< /Length 1461 >>
+stream
+/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def
+/CMapName /Adobe-Identity-UCS def
+/CMapType 2 def
+1 begincodespacerange
+<00> <ff>
+endcodespacerange
+95 beginbfchar
+<20> <0020>
+<21> <0021>
+<22> <0022>
+<23> <0023>
+<24> <0024>
+<25> <0025>
+<26> <0026>
+<27> <0027>
+<28> <0028>
+<29> <0029>
+<2a> <002a>
+<2b> <002b>
+<2c> <002c>
+<2d> <002d>
+<2e> <002e>
+<2f> <002f>
+<30> <0030>
+<31> <0031>
+<32> <0032>
+<33> <0033>
+<34> <0034>
+<35> <0035>
+<36> <0036>
+<37> <0037>
+<38> <0038>
+<39> <0039>
+<3a> <003a>
+<3b> <003b>
+<3c> <003c>
+<3d> <003d>
+<3e> <003e>
+<3f> <003f>
+<40> <0040>
+<41> <0041>
+<42> <0042>
+<43> <0043>
+<44> <0044>
+<45> <0045>
+<46> <0046>
+<47> <0047>
+<48> <0048>
+<49> <0049>
+<4a> <004a>
+<4b> <004b>
+<4c> <004c>
+<4d> <004d>
+<4e> <004e>
+<4f> <004f>
+<50> <0050>
+<51> <0051>
+<52> <0052>
+<53> <0053>
+<54> <0054>
+<55> <0055>
+<56> <0056>
+<57> <0057>
+<58> <0058>
+<59> <0059>
+<5a> <005a>
+<5b> <005b>
+<5c> <005c>
+<5d> <005d>
+<5e> <005e>
+<5f> <005f>
+<60> <0060>
+<61> <0061>
+<62> <0062>
+<63> <0063>
+<64> <0064>
+<65> <0065>
+<66> <0066>
+<67> <0067>
+<68> <0068>
+<69> <0069>
+<6a> <006a>
+<6b> <006b>
+<6c> <006c>
+<6d> <006d>
+<6e> <006e>
+<6f> <006f>
+<70> <0070>
+<71> <0071>
+<72> <0072>
+<73> <0073>
+<74> <0074>
+<75> <0075>
+<76> <0076>
+<77> <0077>
+<78> <0078>
+<79> <0079>
+<7a> <007a>
+<7b> <007b>
+<7c> <007c>
+<7d> <007d>
+<7e> <007e>
+endbfchar
+endcmap
+CMapName currentdict /CMap defineresource pop
+end
+end
+
+endstream
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000000 00000 n 
+0000000049 00000 n 
+0000000106 00000 n 
+0000000232 00000 n 
+0000002706 00000 n 
+0000003262 00000 n 
+0000003449 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R >>
+startxref
+4962
+%%EOF
