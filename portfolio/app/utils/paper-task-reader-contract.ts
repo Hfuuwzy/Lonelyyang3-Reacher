@@ -9,7 +9,7 @@
  */
 
 import { z } from 'zod'
-import { paperTaskStateSchema } from './paper-task-contract'
+import { paperTaskFragmentSchema, paperTaskStateSchema } from './paper-task-contract'
 import { PAPER_TASK_READING_LIMITS } from './paper-task-reading-contract'
 import {
   PAPER_TASK_TRANSLATION_LIMITS,
@@ -19,8 +19,9 @@ import {
 export const PAPER_TASK_READER_BRANCH_DOCUMENTS = ['translation', 'deep-reading'] as const
 export type PaperTaskReaderBranch = (typeof PAPER_TASK_READER_BRANCH_DOCUMENTS)[number]
 
-export const PAPER_TASK_READER_DOCUMENT_STATUSES = ['preview', 'needs-confirmation', 'complete'] as const
+export const PAPER_TASK_READER_DOCUMENT_STATUSES = ['fragment', 'preview', 'needs-confirmation', 'complete'] as const
 export type PaperTaskReaderDocumentStatus = (typeof PAPER_TASK_READER_DOCUMENT_STATUSES)[number]
+export type PaperTaskReaderMasterStatus = Exclude<PaperTaskReaderDocumentStatus, 'fragment'>
 
 export const PAPER_TASK_READER_PDF_KINDS = ['original', 'translated'] as const
 export type PaperTaskPdfKind = (typeof PAPER_TASK_READER_PDF_KINDS)[number]
@@ -72,9 +73,8 @@ const formatStatesSchema = z.object({
   pdf: formatStateSchema,
 }).strict().readonly()
 
-const readerDocumentSchema = z.object({
+const readerDocumentFields = {
   branch: z.enum(PAPER_TASK_READER_BRANCH_DOCUMENTS),
-  status: z.enum(PAPER_TASK_READER_DOCUMENT_STATUSES),
   notice: z.string().min(1).max(PAPER_TASK_READER_LIMITS.maxNoticeLength).nullable(),
   markdown: z.string().min(1).max(Math.max(
     PAPER_TASK_TRANSLATION_LIMITS.maxMarkdownLength,
@@ -82,7 +82,23 @@ const readerDocumentSchema = z.object({
   )),
   assets: z.array(paperTaskControlledAssetSchema).max(PAPER_TASK_TRANSLATION_LIMITS.maxAssets).readonly(),
   formats: formatStatesSchema,
-}).strict().readonly()
+}
+
+const masterReaderDocumentSchema = z.object({
+  ...readerDocumentFields,
+  status: z.enum(['preview', 'needs-confirmation', 'complete']),
+}).strict()
+
+const fragmentReaderDocumentSchema = z.object({
+  ...readerDocumentFields,
+  status: z.literal('fragment'),
+  fragment: paperTaskFragmentSchema,
+}).strict()
+
+export const paperTaskReaderDocumentSchema = z.discriminatedUnion('status', [
+  fragmentReaderDocumentSchema,
+  masterReaderDocumentSchema,
+]).readonly()
 
 export const paperTaskReaderViewSchema = z.object({
   taskId: z.string().uuid(),
@@ -90,14 +106,24 @@ export const paperTaskReaderViewSchema = z.object({
     translation: paperTaskStateSchema,
     'deep-reading': paperTaskStateSchema,
   }).strict().readonly(),
-  documents: z.array(readerDocumentSchema)
+  documents: z.array(paperTaskReaderDocumentSchema)
     .max(PAPER_TASK_READER_LIMITS.maxDocuments)
     .readonly(),
   pdfs: z.object({
     original: pdfStateSchema,
     translated: pdfStateSchema,
   }).strict().readonly(),
-}).strict().readonly()
+}).strict().readonly().superRefine((view, context) => {
+  for (const [index, document] of view.documents.entries()) {
+    if (document.status !== 'fragment') continue
+    if (document.fragment.taskId !== view.taskId) {
+      context.addIssue({ code: 'custom', message: 'reader fragment must belong to the view task', path: ['documents', index, 'fragment', 'taskId'] })
+    }
+    if (document.fragment.branch !== document.branch) {
+      context.addIssue({ code: 'custom', message: 'reader fragment must belong to the document branch', path: ['documents', index, 'fragment', 'branch'] })
+    }
+  }
+})
 
 export type PaperTaskReaderView = z.infer<typeof paperTaskReaderViewSchema>
 export type PaperTaskReaderDocument = PaperTaskReaderView['documents'][number]

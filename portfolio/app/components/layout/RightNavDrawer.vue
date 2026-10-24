@@ -209,4 +209,3 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped src="./right-nav-drawer.css"></style>
-<style scoped src="./right-nav-drawer-tools.css"></style>

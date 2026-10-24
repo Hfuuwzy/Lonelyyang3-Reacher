@@ -1,30 +1,32 @@
 <template>
   <section data-testid="category-landing-blog" class="blog-index">
-    <PaperSectionHeading
-      stamp="博"
-      :english="navItem.englishLabel"
-      :title="localizedTitle"
-      :description="localizedDescription"
-    />
+    <div class="blog-index__inner">
+      <PaperSectionHeading
+        stamp="博"
+        :english="navItem.englishLabel"
+        :title="localizedTitle"
+        :description="localizedDescription"
+      />
 
-    <nav class="blog-index__filters" aria-label="Article categories">
-      <NuxtLink
-        v-for="category in categoryOptions"
-        :key="category.value"
-        class="blog-index__filter"
-        :class="{ 'blog-index__filter--active': selectedCategory === category.value }"
-        :data-testid="`blog-category-${category.testId}`"
-        :aria-current="selectedCategory === category.value ? 'page' : undefined"
-        :to="category.value === ALL_CATEGORIES
-          ? localePath('/blog')
-          : { path: localePath('/blog'), query: { category: category.value } }"
-      >
-        {{ category.label }}
-      </NuxtLink>
-    </nav>
+      <nav class="blog-index__filters" aria-label="Article categories">
+        <NuxtLink
+          v-for="category in categoryOptions"
+          :key="category.value"
+          class="blog-index__filter"
+          :class="{ 'blog-index__filter--active': selectedCategory === category.value }"
+          :data-testid="`blog-category-${category.testId}`"
+          :aria-current="selectedCategory === category.value ? 'page' : undefined"
+          :to="category.value === ALL_CATEGORIES
+            ? localePath('/blog')
+            : { path: localePath('/blog'), query: { category: category.value } }"
+        >
+          {{ category.label }}
+        </NuxtLink>
+      </nav>
 
-    <div data-testid="category-list-blog" class="blog-index__timeline">
-      <ArticleRow v-for="post in filteredPosts" :key="post.path" :post="post" />
+      <div data-testid="category-list-blog" class="blog-index__timeline">
+        <ArticleRow v-for="post in filteredPosts" :key="post.path" :post="post" />
+      </div>
     </div>
   </section>
 </template>

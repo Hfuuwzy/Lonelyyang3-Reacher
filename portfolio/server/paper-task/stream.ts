@@ -1,5 +1,8 @@
+import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { PaperTaskSourceResult } from '../../app/utils/paper-task-source-contract'
+import type { StoredPaperTaskSnapshot } from './task-index'
+import { outcomeForHistoryStatus } from './task-index'
 import {
   getSelectedBranches,
   type PaperTaskBranch,
@@ -11,12 +14,81 @@ import type { PaperTaskPdfInput } from './multipart'
 import type { PreparedPaperTaskSource } from './source-acquisition'
 import { saveWorkContext, workspacePaths } from './workspace'
 import type { PaperTaskRuntimeFactory } from './runtime'
-import { cleanupStatus, finalizeHandle, requestStop, stopOutcome, type PaperTaskHandle } from './handle'
+import { cleanupStatus, finalizeHandle, type PaperTaskHandle } from './handle'
 import { EventQueue, takeOrAbort } from './queue'
 import type { createPaperTaskSourceStore } from './source-store'
 import { runPaperTaskBranch } from './branch-stream'
 
 export type PreparePaperTaskSource = (bytes: Uint8Array, signal?: AbortSignal) => Promise<PaperTaskSourceResult>
+
+/**
+ * In-memory event history with independent replaying readers. Returning an
+ * iterator only detaches that observer; it never signals the task producer.
+ */
+class ReplayablePaperTaskEvents implements AsyncIterable<PaperTaskEvent> {
+  private readonly items: PaperTaskEvent[] = []
+  private readonly waiters = new Set<() => void>()
+  private closed = false
+
+  push(event: PaperTaskEvent): void {
+    this.items.push(event)
+    for (const wake of [...this.waiters]) wake()
+  }
+
+  close(): void {
+    this.closed = true
+    for (const wake of [...this.waiters]) wake()
+  }
+
+  [Symbol.asyncIterator](): AsyncIterator<PaperTaskEvent> {
+    let index = 0
+    let finished = false
+    let waiting: (() => void) | undefined
+    let resolvePending: ((result: IteratorResult<PaperTaskEvent>) => void) | undefined
+    const done: IteratorResult<PaperTaskEvent> = { done: true, value: undefined }
+
+    const ready = (): IteratorResult<PaperTaskEvent> | undefined => {
+      if (finished) return done
+      const event = this.items[index]
+      if (event !== undefined) {
+        index += 1
+        return { done: false, value: event }
+      }
+      if (this.closed) {
+        finished = true
+        return done
+      }
+      return undefined
+    }
+
+    return {
+      next: () => {
+        const immediate = ready()
+        if (immediate !== undefined) return Promise.resolve(immediate)
+        return new Promise<IteratorResult<PaperTaskEvent>>((resolveNext) => {
+          const wake = (): void => {
+            this.waiters.delete(wake)
+            if (waiting === wake) waiting = undefined
+            if (resolvePending === resolveNext) resolvePending = undefined
+            resolveNext(ready() ?? done)
+          }
+          waiting = wake
+          resolvePending = resolveNext
+          this.waiters.add(wake)
+        })
+      },
+      return: async () => {
+        finished = true
+        if (waiting !== undefined) this.waiters.delete(waiting)
+        waiting = undefined
+        const resolveNext = resolvePending
+        resolvePending = undefined
+        resolveNext?.(done)
+        return done
+      },
+    }
+  }
+}
 
 export function createTaskEvents(
   handle: PaperTaskHandle,
@@ -26,74 +98,67 @@ export function createTaskEvents(
   sourceStore: ReturnType<typeof createPaperTaskSourceStore>,
   unavailableBranches: readonly PaperTaskBranch[] = [],
   preparedSource?: PreparedPaperTaskSource,
+  onEvent: (event: PaperTaskEvent) => void = () => undefined,
 ): AsyncIterable<PaperTaskEvent> {
-  const queue = new EventQueue<{ readonly kind: 'event'; readonly event: PaperTaskEvent }>()
+  const events = new ReplayablePaperTaskEvents()
   const branchQueue = new EventQueue()
   const runners: Array<Promise<void>> = []
-  let producer: Promise<void> | undefined
-  let suppressTerminal = false
+  handle.execution = produceTask(
+    handle,
+    input,
+    runtimeFactory,
+    prepareSource,
+    sourceStore,
+    events,
+    branchQueue,
+    runners,
+    unavailableBranches,
+    preparedSource,
+    onEvent,
+  ).catch(async () => {
+    await finalizeHandle(handle)
+    handle.anyFailed = true
+    markUnfinished(handle.branches, getSelectedBranches(input.selection), 'failed')
+    handle.outcome = 'failed'
+    handle.onChange()
+    events.push({
+      type: 'terminal',
+      taskId: handle.taskId,
+      outcome: 'failed',
+      branches: { ...handle.branches },
+      cleanup: cleanupStatus(handle),
+    })
+  }).finally(() => events.close())
+  return events
+}
 
-  const start = (): void => {
-    if (producer !== undefined) {
-      return
+/** Replay only the persisted public snapshot for a recovered, already-settled task. */
+export function createRecoveredTaskEvents(snapshot: StoredPaperTaskSnapshot): AsyncIterable<PaperTaskEvent> {
+  const events = new ReplayablePaperTaskEvents()
+  events.push({ type: 'accepted', taskId: snapshot.taskId, selection: snapshot.selection })
+  const previewsByBranch = new Map(snapshot.previews.map((preview) => [preview.branch, preview]))
+  for (const branch of getSelectedBranches(snapshot.selection)) {
+    const preview = previewsByBranch.get(branch)
+    if (preview !== undefined) {
+      events.push({
+        type: 'preview',
+        taskId: snapshot.taskId,
+        branch,
+        designation: preview.designation,
+        paragraphs: [...preview.paragraphs],
+        ...(preview.quality === undefined ? {} : { quality: { ...preview.quality, issues: [...preview.quality.issues], options: [...preview.quality.options] } }),
+      })
     }
-    handle.started = true
-    producer = produceTask(
-      handle,
-      input,
-      runtimeFactory,
-      prepareSource,
-      sourceStore,
-      queue,
-      branchQueue,
-      runners,
-      () => suppressTerminal,
-      unavailableBranches,
-      preparedSource,
-    )
   }
-
-  return {
-    [Symbol.asyncIterator]() {
-      let terminalRead = false
-      return {
-        async next(): Promise<IteratorResult<PaperTaskEvent>> {
-          if (terminalRead) {
-            return { done: true, value: undefined }
-          }
-          if (producer === undefined && handle.finalizer !== undefined) {
-            return { done: true, value: undefined }
-          }
-          start()
-          const item = await queue.take()
-          terminalRead = item.event.type === 'terminal'
-          return { done: false, value: item.event }
-        },
-        async return(): Promise<IteratorResult<PaperTaskEvent>> {
-          suppressTerminal = true
-          requestStop(handle, 'disconnect')
-          if (producer === undefined) {
-            handle.started = true
-            producer = produceTask(
-              handle,
-              input,
-              runtimeFactory,
-              prepareSource,
-              sourceStore,
-              queue,
-              branchQueue,
-              runners,
-              () => true,
-              unavailableBranches,
-              preparedSource,
-            )
-          }
-          await handle.settled
-          return { done: true, value: undefined }
-        },
-      }
-    },
-  }
+  events.push({
+    type: 'terminal',
+    taskId: snapshot.taskId,
+    outcome: outcomeForHistoryStatus(snapshot.status),
+    branches: { ...snapshot.branches },
+    cleanup: snapshot.cleanup,
+  })
+  events.close()
+  return events
 }
 
 async function produceTask(
@@ -102,17 +167,17 @@ async function produceTask(
   runtimeFactory: PaperTaskRuntimeFactory,
   prepareSource: PreparePaperTaskSource,
   sourceStore: ReturnType<typeof createPaperTaskSourceStore>,
-  queue: EventQueue<{ readonly kind: 'event'; readonly event: PaperTaskEvent }>,
+  events: ReplayablePaperTaskEvents,
   branchQueue: EventQueue,
   runners: Promise<void>[],
-  suppressTerminal: () => boolean,
   unavailableBranches: readonly PaperTaskBranch[],
   preparedSource?: PreparedPaperTaskSource,
+  onEvent: (event: PaperTaskEvent) => void = () => undefined,
 ): Promise<void> {
   const selected = getSelectedBranches(input.selection)
   let outcome: PaperTaskOutcome = 'succeeded'
-  queue.push({ kind: 'event', event: { type: 'accepted', taskId: handle.taskId, selection: input.selection } })
-  queue.push({ kind: 'event', event: progressEvent(handle.taskId, 'preparing', null, 0, 1) })
+  events.push({ type: 'accepted', taskId: handle.taskId, selection: input.selection })
+  events.push(progressEvent(handle.taskId, 'preparing', null, 0, 1))
   try {
     const prepared = preparedSource ?? await prepareSource(input.pdf, handle.controller.signal)
     if (handle.controller.signal.aborted) {
@@ -123,7 +188,7 @@ async function produceTask(
       markUnfinished(handle.branches, selected, 'failed')
       return
     }
-    queue.push({ kind: 'event', event: progressEvent(handle.taskId, 'preparing', null, 1, 1) })
+    events.push(progressEvent(handle.taskId, 'preparing', null, 1, 1))
     try {
       saveWorkContext(handle.workspaceRoot, {
         taskId: handle.taskId,
@@ -146,9 +211,11 @@ async function produceTask(
     const sourceReadPaths = sourceStore.workerReadPaths(handle.taskId, handle.workspaceRoot)
     const doneBranches = new Set<PaperTaskBranch>(unavailableBranches)
     for (const branch of unavailableBranches) {
+      recordUnavailableBranchResources(handle.workspaceRoot, branch)
       handle.branches[branch] = 'failed'
       handle.anyFailed = true
     }
+    if (unavailableBranches.length > 0) handle.onChange()
     for (const branch of selected) {
       if (unavailableBranches.includes(branch)) continue
       if (handle.controller.signal.aborted) {
@@ -163,12 +230,15 @@ async function produceTask(
           runtimeHome: join(handle.runtimeRoot, branch),
           signal: handle.controller.signal,
         })
+        handle.branches[branch] = 'running'
+        handle.onChange()
         handle.runtimes.set(branch, runtime)
         runners.push(runPaperTaskBranch({ handle, branch, runtime, queue: branchQueue, sourceRecords }))
       } catch {
         doneBranches.add(branch)
         handle.branches[branch] = 'failed'
         handle.anyFailed = true
+        handle.onChange()
       }
     }
 
@@ -178,36 +248,56 @@ async function produceTask(
         break
       }
       if (item.kind === 'event') {
-        queue.push(item)
+        events.push(item.event)
+        onEvent(item.event)
         continue
       }
       doneBranches.add(item.branch)
       handle.branches[item.branch] = item.ok ? item.state : 'failed'
       handle.anyFailed ||= !item.ok
+      handle.onChange()
     }
   } catch {
     outcome = 'failed'
     markUnfinished(handle.branches, selected, 'failed')
+    handle.onChange()
   } finally {
-    queue.push({ kind: 'event', event: progressEvent(handle.taskId, 'cleaning', null, 0, 1) })
+    events.push(progressEvent(handle.taskId, 'cleaning', null, 0, 1))
     await finalizeHandle(handle, runners)
-    queue.push({ kind: 'event', event: progressEvent(handle.taskId, 'cleaning', null, 1, 1) })
+    events.push(progressEvent(handle.taskId, 'cleaning', null, 1, 1))
     if (handle.controller.signal.aborted) {
       markUnfinished(handle.branches, selected, 'cancelled')
-      outcome = stopOutcome(handle)
+      outcome = 'cancelled'
     } else {
       markUnfinished(handle.branches, selected, handle.anyFailed || handle.cleanupFailed ? 'failed' : 'sample-ready')
       if (handle.anyFailed || handle.cleanupFailed) {
         outcome = 'failed'
       }
     }
-    if (!suppressTerminal()) {
-      queue.push({
-        kind: 'event',
-        event: terminalEvent(handle.taskId, outcome, handle.branches, cleanupStatus(handle)),
-      })
-    }
+    handle.outcome = outcome
+    handle.onChange()
+    events.push(terminalEvent(handle.taskId, outcome, handle.branches, cleanupStatus(handle)))
   }
+}
+
+const UNAVAILABLE_BRANCH_RESOURCE_MESSAGE = 'The selected branch did not start because its local skill resources are unavailable or invalid. Check the local skill configuration and retry.'
+
+function recordUnavailableBranchResources(workspaceRoot: string, branch: PaperTaskBranch): void {
+  const record = {
+    at: new Date().toISOString(),
+    branch,
+    stage: 'preflight',
+    code: 'GENERATION_RESOURCES_UNAVAILABLE',
+    name: 'GenerationResourcesUnavailableError',
+    timedOut: false,
+    message: UNAVAILABLE_BRANCH_RESOURCE_MESSAGE,
+  }
+  try {
+    writeFileSync(join(workspacePaths(workspaceRoot).branchDirectories[branch], 'runtime-error.json'), JSON.stringify(record), { flag: 'w', mode: 0o600 })
+  } catch {
+    // Diagnostics are best effort; task status must still settle if the retained workspace is unavailable.
+  }
+  console.error(`[paper-task] ${branch} runtime preflight failed: ${record.code}`)
 }
 
 function markUnfinished(

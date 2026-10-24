@@ -1,8 +1,20 @@
 <template>
   <aside data-testid="right-nav-rail" class="right-nav-rail" aria-label="Site navigation controls">
     <NuxtLink :to="localePath('/')" data-testid="right-nav-brand" class="rail-brand" aria-label="Lonelyyang3 home">
-      <span class="rail-brand__name">Lonelyyang3</span>
-      <span class="rail-brand__subtitle">和风门户</span>
+      <span class="rail-brand__stack" aria-hidden="true">
+        <img
+          v-for="path in BRAND_LAYER_PATHS"
+          :key="path"
+          class="rail-brand__layer"
+          :src="path"
+          width="724"
+          height="2172"
+          alt=""
+          loading="eager"
+          decoding="async"
+          draggable="false"
+        >
+      </span>
     </NuxtLink>
 
     <button
@@ -49,6 +61,13 @@ interface Emits {
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 const localePath = useLocalePath()
+const BRAND_LAYER_PATHS = [
+  '/images/brand/home-intro/logo01-lonely-clean.png',
+  '/images/brand/home-intro/logo02-yang-clean.png',
+  '/images/brand/home-intro/logo03-3.png',
+  '/images/brand/home-intro/logo04-icon.png',
+  '/images/brand/home-intro/logo05-wordmark.png',
+] as const
 
 function handleMenuClick(): void {
   if (props.open) {
@@ -63,42 +82,42 @@ function handleMenuClick(): void {
 <style scoped>
 .right-nav-rail {
   position: fixed;
-  z-index: 60;
+  z-index: 90;
   inset-block: 0;
   inset-inline-end: 0;
   display: flex;
-  inline-size: var(--rail-width);
+  inline-size: var(--right-rail-width-desktop);
   flex-direction: column;
   align-items: center;
   padding-block: 32px 24px;
   border-inline-start: 1px solid var(--rule);
   background-color: var(--nav-paper);
   background-image: var(--nav-paper-texture);
+  background-blend-mode: var(--nav-paper-texture-blend-mode);
   color: var(--ink);
 }
 
 .rail-brand {
-  display: inline-flex;
+  display: block;
   min-inline-size: 44px;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
   color: inherit;
   text-decoration: none;
-  writing-mode: vertical-rl;
 }
 
-.rail-brand__name {
-  font-family: var(--font-mincho);
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: 0.16em;
+.rail-brand__stack {
+  position: relative;
+  display: block;
+  inline-size: clamp(54px, 3.125vw, 80px);
+  aspect-ratio: 724 / 2172;
 }
 
-.rail-brand__subtitle {
-  color: var(--ink-soft);
-  font-size: 12px;
-  letter-spacing: 0.24em;
+.rail-brand__layer {
+  position: absolute;
+  inset: 0;
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  filter: invert(var(--home-brand-theme-invert)) hue-rotate(var(--home-brand-theme-hue));
 }
 
 .rail-menu {
@@ -160,18 +179,24 @@ function handleMenuClick(): void {
 
 @media (width < 1024px) {
   .right-nav-rail {
-    inline-size: var(--rail-width-tablet);
+    inline-size: var(--right-rail-width-tablet);
   }
 }
 
 @media (width < 768px) {
   .right-nav-rail {
-    inline-size: var(--rail-width-mobile);
+    inline-size: var(--right-rail-width-mobile);
     padding-block: 24px 16px;
   }
 
-  .rail-brand__subtitle {
-    display: none;
+  .rail-brand__stack {
+    inline-size: 44px;
+  }
+}
+
+@media (height < 700px) {
+  .rail-brand__stack {
+    inline-size: 48px;
   }
 }
 

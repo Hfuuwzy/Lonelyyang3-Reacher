@@ -240,12 +240,13 @@ describe('paper-task lifecycle — real local child processes', () => {
 })
 
 describe('paper-task lifecycle — real socket disconnect', () => {
-  it('emits a disconnected terminal and stops the running child when the socket dies', async () => {
+  it('keeps the accepted task running when its SSE socket disconnects, then replays the result', async () => {
     const root = tempRoot()
     const spawned: ChildProcess[] = []
     const factory = createSampleProcessRuntimeFactory({
       spawnChild: (nodePath) => {
-        const child = spawn(nodePath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+        const script = `${workerScriptEventLine({ type: 'preview', paragraphs: ['脱离页面后继续完成的样例。'] })}\nsetTimeout(() => process.exit(0), 100)`
+        const child = spawn(nodePath, ['-e', script], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
         spawned.push(child)
         return child
       },
@@ -264,13 +265,21 @@ describe('paper-task lifecycle — real socket disconnect', () => {
       res.write(': connected\n\n')
       void (async () => {
         try {
-          const submission = await svc.submit(input('both'), { signal: disconnect.signal })
+          const submission = await svc.submit(input('both'))
           if (submission.ok) {
-            for await (const event of submission.events) {
-              streamEvents.push(event)
-              if (!disconnect.signal.aborted) {
-                res.write(`data: ${JSON.stringify(event)}\n\n`)
+            const iterator = submission.events[Symbol.asyncIterator]()
+            const returnOnDisconnect = (): void => { void iterator.return?.() }
+            disconnect.signal.addEventListener('abort', returnOnDisconnect, { once: true })
+            try {
+              while (!disconnect.signal.aborted) {
+                const item = await iterator.next()
+                if (item.done) break
+                streamEvents.push(item.value)
+                if (!disconnect.signal.aborted) res.write(`data: ${JSON.stringify(item.value)}\n\n`)
               }
+            } finally {
+              disconnect.signal.removeEventListener('abort', returnOnDisconnect)
+              await iterator.return?.()
             }
           }
         } finally {
@@ -294,14 +303,18 @@ describe('paper-task lifecycle — real socket disconnect', () => {
     socket.destroy()
     await streamCompleted.promise
 
-    const terminal = terminalOf(streamEvents)
-    if (terminal.type === 'terminal') {
-      expect(terminal.outcome).toBe('disconnected')
-      expect(terminal.branches).toEqual({ translation: 'cancelled', 'deep-reading': 'cancelled' })
-    }
+    expect(streamEvents.some((event) => event.type === 'terminal')).toBe(false)
+    await waitFor(() => svc.history()[0]?.status === 'success')
+    const replayed = await collect(svc.events(TASK_ID)!)
+    const terminal = terminalOf(replayed)
+    expect(terminal).toMatchObject({
+      outcome: 'succeeded',
+      branches: { translation: 'sample-ready', 'deep-reading': 'sample-ready' },
+    })
     for (const child of spawned) {
       await waitForExit(child)
     }
+    expect(spawned).toHaveLength(2)
     expect(existsSync(join(root, 'runtime-local', TASK_ID))).toBe(false)
     expect(existsSync(join(root, 'project-local', TASK_ID, 'original.pdf'))).toBe(true)
   })

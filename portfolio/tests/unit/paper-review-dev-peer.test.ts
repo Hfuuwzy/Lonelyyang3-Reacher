@@ -87,6 +87,34 @@ describe('paper-task dev peer attestation', () => {
     )
   })
 
+  it('attests only the exact paper-task history GET', async () => {
+    const { event, req } = makeEvent({
+      method: 'GET',
+      url: '/api/prototype/paper-task',
+      remoteAddress: '::1',
+      headers: { host: HOST, origin: ORIGIN },
+    })
+    await createDevPeerParentHandler(TEST_KEY)(event)
+    expect(req.headers[PAPER_REVIEW_DEV_PEER_HEADER]).toBe('::1')
+    expect(req.headers[PAPER_REVIEW_DEV_PROOF_HEADER]).toBe(
+      signDevPeerProof(TEST_KEY, 'GET', HOST, ORIGIN, '::1'),
+    )
+  })
+
+  it('attests replay only for an exact UUID-shaped paper-task events path', async () => {
+    const { event, req } = makeEvent({
+      method: 'GET',
+      url: `/api/prototype/paper-task/${TASK_ID}/events`,
+      remoteAddress: '::1',
+      headers: { host: HOST, origin: ORIGIN },
+    })
+    await createDevPeerParentHandler(TEST_KEY)(event)
+    expect(req.headers[PAPER_REVIEW_DEV_PEER_HEADER]).toBe('::1')
+    expect(req.headers[PAPER_REVIEW_DEV_PROOF_HEADER]).toBe(
+      signDevPeerProof(TEST_KEY, 'GET', HOST, ORIGIN, '::1'),
+    )
+  })
+
   it.each(['GET', 'PUT', 'DELETE'])('attests %s for independent paper-task provider settings', async (method) => {
     const { event, req } = makeEvent({
       method,
@@ -142,7 +170,8 @@ describe('paper-task dev peer attestation', () => {
     ['a non-UUID delete path', 'DELETE', '/api/prototype/paper-task/not-a-uuid'],
     ['a cancel DELETE', 'DELETE', `/api/prototype/paper-task/${TASK_ID}/cancel`],
     ['a submission DELETE', 'DELETE', '/api/prototype/paper-task'],
-    ['a GET on the submission path', 'GET', '/api/prototype/paper-task'],
+    ['an event path with a non-UUID task ID', 'GET', '/api/prototype/paper-task/not-a-uuid/events'],
+    ['an event path with an extra segment', 'GET', `/api/prototype/paper-task/${TASK_ID}/events/extra`],
     ['an unknown paper-task path', 'POST', '/api/prototype/paper-task/extra/segment'],
   ])('leaves %s unattested so the worker gate denies it', async (_label, method, url) => {
     const { event, req } = makeEvent({

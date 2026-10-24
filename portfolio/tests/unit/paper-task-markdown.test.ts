@@ -10,6 +10,12 @@ describe('translation master rendering', () => {
     expect(html).toBe('<h1>论文标题</h1><p>第一段。</p><h2>附录 A</h2><p>第二段。</p>')
   })
 
+  it('renders only safe scholarly superscript and subscript tags inline', () => {
+    const html = renderPaperTaskTranslationMarkdown('作者<sup>1,2</sup> 与 H<sub>2</sub>O。', resolveAsset)
+
+    expect(html).toBe('<p>作者<sup>1,2</sup> 与 H<sub>2</sub>O。</p>')
+  })
+
   it('renders a controlled original asset with its translated caption', () => {
     const html = renderPaperTaskTranslationMarkdown('![表1 各组结果](asset:asset-abc)', resolveAsset)
     expect(html).toBe(`<p><img src="${ASSET_URL}" alt="表1 各组结果" loading="lazy" decoding="async"></p>`)

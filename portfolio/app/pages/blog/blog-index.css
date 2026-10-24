@@ -1,8 +1,20 @@
 .blog-index {
   position: relative;
   display: grid;
+  inline-size: calc(100% + var(--site-rail-width));
+  grid-template-columns:
+    minmax(0, 1fr)
+    minmax(0, min(960px, calc(100% - var(--site-axis-gutter) - var(--site-axis-gutter))))
+    minmax(0, 1fr);
+  padding-block: 64px 96px;
+}
+
+.blog-index__inner {
+  display: grid;
+  grid-column: 2;
   gap: 48px;
-  padding: 64px clamp(32px, 8vw, 96px);
+  justify-items: start;
+  min-inline-size: 0;
 }
 
 .blog-index__filters {
@@ -45,7 +57,10 @@
 
 @media (max-width: 767px) {
   .blog-index {
+    padding-block: 32px 80px;
+  }
+
+  .blog-index__inner {
     gap: 32px;
-    padding: 32px 24px;
   }
 }

@@ -199,8 +199,13 @@ class SampleProcessRuntime implements PaperTaskRuntime {
   }
 
   close(): Promise<PaperTaskCloseResult> {
-    this.closePromise ??= this.doClose()
-    return this.closePromise
+    if (this.closePromise !== undefined) return this.closePromise
+    const attempt = this.doClose()
+    this.closePromise = attempt
+    void attempt.then((result) => {
+      if (!result.ok && this.closePromise === attempt) this.closePromise = undefined
+    })
+    return attempt
   }
 
   private async doClose(): Promise<PaperTaskCloseResult> {

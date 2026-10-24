@@ -15,7 +15,7 @@
  * every branch state, `outcome` is the task-level result, and each outcome
  * admits only its legal branch-state combinations (unselected branches stay
  * `not-selected`, and no terminal ever carries an in-flight state: a
- * disconnect or cancel marks the unfinished branches `cancelled`).
+ * explicit cancel marks the unfinished branches `cancelled`).
  */
 
 import { z } from 'zod'
@@ -37,7 +37,7 @@ export type PaperTaskStage = (typeof PAPER_TASK_STAGES)[number]
  * one content review finished and whose independent structural checks found no
  * substantive issue. No preview designation can claim completion.
  */
-export const PAPER_TASK_STATES = ['not-selected', 'pending', 'running', 'sample-ready', 'preview-ready', 'needs-confirmation', 'complete', 'failed', 'cancelled'] as const
+export const PAPER_TASK_STATES = ['not-selected', 'pending', 'running', 'sample-ready', 'preview-ready', 'needs-confirmation', 'complete', 'failed', 'cancelled', 'interrupted'] as const
 export type PaperTaskState = (typeof PAPER_TASK_STATES)[number]
 
 /** Quality states carried by a generated preview; never a task outcome. */
@@ -54,8 +54,11 @@ export const PAPER_TASK_QUALITY_LIMITS = {
   maxOptions: 4,
 } as const
 
-export const PAPER_TASK_OUTCOMES = ['succeeded', 'failed', 'cancelled', 'disconnected'] as const
+export const PAPER_TASK_OUTCOMES = ['succeeded', 'failed', 'cancelled', 'interrupted'] as const
 export type PaperTaskOutcome = (typeof PAPER_TASK_OUTCOMES)[number]
+
+export const PAPER_TASK_HISTORY_STATUSES = ['running', 'success', 'fail', 'stopped', 'interrupted'] as const
+export type PaperTaskHistoryStatus = (typeof PAPER_TASK_HISTORY_STATUSES)[number]
 
 /** Designations a preview may carry. `sample` means unfinished; a
  * `generated-preview` may additionally carry a bounded quality result, but the
@@ -76,6 +79,39 @@ export const paperTaskQualitySchema = z.object({
     .max(PAPER_TASK_QUALITY_LIMITS.maxOptions).readonly(),
 }).strict().readonly()
 export type PaperTaskQuality = z.infer<typeof paperTaskQualitySchema>
+
+export const PAPER_TASK_FRAGMENT_REASONS = [
+  'branch-running',
+  'branch-failed',
+  'task-stopped',
+  'service-interrupted',
+  'final-master-unavailable',
+  'result-not-published',
+] as const
+export type PaperTaskFragmentReason = (typeof PAPER_TASK_FRAGMENT_REASONS)[number]
+
+export const PAPER_TASK_FRAGMENT_SOURCES = [
+  'drafts/translation/preview.md',
+  'drafts/translation/master.md',
+  'drafts/deep-reading/preview.md',
+  'drafts/deep-reading/report.md',
+] as const
+export type PaperTaskFragmentSource = (typeof PAPER_TASK_FRAGMENT_SOURCES)[number]
+
+/** Provenance for readable bytes retained in one task-owned branch file. */
+export const paperTaskFragmentSchema = z.object({
+  taskId: z.string().uuid(),
+  branch: z.enum(PAPER_TASK_BRANCHES),
+  identity: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+  source: z.enum(PAPER_TASK_FRAGMENT_SOURCES),
+  reason: z.enum(PAPER_TASK_FRAGMENT_REASONS),
+  quality: paperTaskQualitySchema.nullable(),
+}).strict().readonly().superRefine((fragment, context) => {
+  if (!fragment.source.startsWith(`drafts/${fragment.branch}/`)) {
+    context.addIssue({ code: 'custom', message: 'fragment source must belong to its branch', path: ['source'] })
+  }
+})
+export type PaperTaskFragment = z.infer<typeof paperTaskFragmentSchema>
 
 /** Per-preview paragraph bounds shared by the backend and the frontend. */
 export const PAPER_TASK_PREVIEW_PARAGRAPH_LIMITS = {
@@ -160,13 +196,37 @@ const previewEventSchema = z.object({
 const branchStatesSchema = z.object({
   translation: paperTaskStateSchema,
   'deep-reading': paperTaskStateSchema,
+}).strict()
+
+export const paperTaskHistoryEntrySchema = z.object({
+  taskId: paperTaskIdSchema,
+  sourceTitle: z.string().min(1).max(200),
+  createdAt: z.string().datetime(),
+  selection: paperTaskSelectionSchema,
+  status: z.enum(PAPER_TASK_HISTORY_STATUSES),
+  deletionPending: z.literal(true).optional(),
+  branches: branchStatesSchema,
+  /** Older task-history responses did not contain fragment descriptors. */
+  fragments: z.array(paperTaskFragmentSchema).max(PAPER_TASK_BRANCHES.length).optional(),
+}).strict().readonly().superRefine((entry, context) => {
+  const branches = new Set<PaperTaskBranch>()
+  for (const [index, fragment] of (entry.fragments ?? []).entries()) {
+    if (fragment.taskId !== entry.taskId) {
+      context.addIssue({ code: 'custom', message: 'fragment must belong to this task', path: ['fragments', index, 'taskId'] })
+    }
+    if (entry.branches[fragment.branch] === 'not-selected' || branches.has(fragment.branch)) {
+      context.addIssue({ code: 'custom', message: 'history fragments must belong to unique selected branches', path: ['fragments', index, 'branch'] })
+    }
+    branches.add(fragment.branch)
+  }
 })
+export type PaperTaskHistoryEntry = z.infer<typeof paperTaskHistoryEntrySchema>
 
 /**
  * Per-outcome legality of branch states, derived from the acceptance criteria:
  * unselected branches must stay `not-selected`, a single branch failure must
  * not mask siblings, and no terminal ever leaves a branch in-flight — a
- * disconnect or cancel marks the unfinished branches `cancelled`. A cancel may
+ * explicit cancel marks the unfinished branches `cancelled`. A cancel may
  * also arrive while the task is cleaning up, in which case every sample is
  * retained (`sample-ready`) and no branch needs to be `cancelled`; likewise a
  * cancel may land on a task whose sibling branch already failed.
@@ -175,7 +235,7 @@ const PAPER_TASK_TERMINAL_STATE_RULES: Record<PaperTaskOutcome, ReadonlySet<Pape
   succeeded: new Set(['complete', 'needs-confirmation', 'preview-ready', 'sample-ready', 'not-selected']),
   failed: new Set(['complete', 'needs-confirmation', 'preview-ready', 'sample-ready', 'failed', 'not-selected']),
   cancelled: new Set(['complete', 'needs-confirmation', 'preview-ready', 'sample-ready', 'failed', 'cancelled', 'not-selected']),
-  disconnected: new Set(['complete', 'needs-confirmation', 'preview-ready', 'sample-ready', 'failed', 'cancelled', 'not-selected']),
+  interrupted: new Set(['complete', 'needs-confirmation', 'preview-ready', 'sample-ready', 'failed', 'cancelled', 'interrupted', 'not-selected']),
 }
 
 const terminalEventSchema = z.object({

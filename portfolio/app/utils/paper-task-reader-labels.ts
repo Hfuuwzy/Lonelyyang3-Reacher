@@ -5,11 +5,13 @@ import type {
 
 const DOCUMENT_LABELS = {
   translation: {
+    fragment: '译文未完成片段',
     preview: '译文草稿',
     'needs-confirmation': '译文草稿',
     complete: '全文译文',
   },
   'deep-reading': {
+    fragment: '深读未完成片段',
     preview: '深读报告',
     'needs-confirmation': '深读报告',
     complete: '深读报告',

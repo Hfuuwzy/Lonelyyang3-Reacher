@@ -1,0 +1,40 @@
+.blog-detail {
+  --blog-reading-font-family:
+    "Noto Serif SC",
+    "Songti SC",
+    "STSong",
+    "SimSun",
+    "YakuHanMP",
+    "Noto Serif JP",
+    "Yu Mincho",
+    "YuMincho",
+    "Hiragino Mincho ProN",
+    serif;
+  font-family: var(--blog-reading-font-family);
+}
+
+.blog-detail[lang="ja"] {
+  --blog-reading-font-family:
+    "Noto Serif JP",
+    "YakuHanMP",
+    "Yu Mincho",
+    "YuMincho",
+    "Hiragino Mincho ProN",
+    "Noto Serif SC",
+    "Songti SC",
+    "STSong",
+    "SimSun",
+    serif;
+}
+
+.blog-detail__title,
+.blog-detail .blog-detail__body .article-prose,
+.blog-detail .blog-detail__body .article-prose h2,
+.blog-detail .blog-detail__body .article-prose h3,
+.blog-detail .blog-detail__body .article-prose h4 {
+  font-family: var(--blog-reading-font-family);
+}
+
+.blog-detail .blog-detail__body .article-prose :not(pre) > code {
+  font-family: inherit;
+}

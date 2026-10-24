@@ -149,7 +149,7 @@
         </button>
         <NuxtLink
           class="paper-task-api-settings__button paper-task-api-settings__button--return"
-          :to="localePath('/prototype/paper-task')"
+          :to="localePath(returnTo)"
         >
           返回论文任务
         </NuxtLink>
@@ -163,7 +163,7 @@
     <section class="paper-task-api-settings__disclosure" aria-labelledby="paper-task-api-disclosure-title">
       <h3 id="paper-task-api-disclosure-title" class="paper-task-api-settings__section-title">发送内容与费用</h3>
       <p>
-        任务会发送论文原文文字、任务指令、实际加载的技能与参考资料，以及受控工具结果。启用图像输入后，任务会在应用边界内发送原始表格、公式与算法 PNG 裁剪及对应的原始上下文；不保证所有素材都会发送，请查阅各素材状态。
+        任务会把论文原文文字、任务指令、实际加载的技能与参考资料，以及受控工具结果发送至当前所选提供方配置的 API。启用图像输入后，任务会在应用边界内发送原始表格、公式与算法 PNG 裁剪及对应的原始上下文；不保证所有素材都会发送，请查阅各素材状态。
       </p>
       <p>图像输入开关只记录提供方的能力声明，尚未逐端点验证。</p>
       <p>
@@ -179,6 +179,9 @@ import { computed } from 'vue'
 import { usePaperTaskApiSettings } from '~/composables/paper-task-api-settings'
 import { PAPER_TASK_PROVIDER_PROTOCOLS, PAPER_TASK_PROVIDER_PROTOCOL_INFO } from '~/utils/paper-task-provider-contract'
 
+const props = withDefaults(defineProps<{ readonly returnTo?: string }>(), {
+  returnTo: '/prototype/paper-task',
+})
 const localePath = useLocalePath()
 
 const NOTICE_COPY = {
@@ -213,6 +216,7 @@ const protocolLabel = computed(() => {
 })
 
 const noticeText = computed(() => notice.value === null ? null : NOTICE_COPY[notice.value])
+const returnTo = computed(() => props.returnTo)
 </script>
 
 <style scoped src="~/assets/css/paper-task-api-settings.css"></style>

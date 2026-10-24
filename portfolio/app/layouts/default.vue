@@ -5,7 +5,7 @@
         <slot />
       </main>
 
-      <LayoutFooter />
+      <LayoutFooter v-if="!isHomeRoute" />
     </div>
 
     <LayoutRightNavDrawer
@@ -60,29 +60,46 @@ watch(navigationVisible, (visible) => {
 
 <style scoped>
 .site-shell {
+  --site-rail-width: var(--right-rail-width-desktop);
+  --site-axis-gutter: max(24px, calc(var(--site-rail-width) + 20px));
+
+  display: flex;
+  flex-direction: column;
   min-block-size: 100dvh;
   background: var(--paper);
   color: var(--ink);
 }
 
 .site-content {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
   min-inline-size: 0;
-  padding-inline-end: var(--rail-width);
+  padding-inline-end: var(--site-rail-width);
 }
 
 .site-main {
-  min-block-size: 70dvh;
+  flex: 1 0 auto;
+  min-inline-size: 0;
 }
 
 @media (width < 1024px) {
+  .site-shell {
+    --site-rail-width: var(--right-rail-width-tablet);
+  }
+
   .site-content {
-    padding-inline-end: var(--rail-width-tablet);
+    padding-inline-end: var(--site-rail-width);
   }
 }
 
 @media (width < 768px) {
+  .site-shell {
+    --site-rail-width: var(--right-rail-width-mobile);
+  }
+
   .site-content {
-    padding-inline-end: var(--rail-width-mobile);
+    padding-inline-end: var(--site-rail-width);
   }
 }
 </style>

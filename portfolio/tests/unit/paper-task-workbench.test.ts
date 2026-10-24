@@ -50,6 +50,15 @@ const SUCCESSFUL_TERMINAL: PaperTaskEvent = {
   cleanup: 'clean',
 }
 
+const HISTORY_ENTRY = {
+  taskId: TASK_ID,
+  sourceTitle: 'paper.pdf',
+  createdAt: '2026-10-23T12:00:00.000Z',
+  selection: 'both',
+  status: 'running',
+  branches: { translation: 'running', 'deep-reading': 'pending' },
+} as const
+
 function deferred<T>(): { readonly promise: Promise<T>; readonly resolve: (value: T) => void } {
   let resolvePromise: ((value: T) => void) | undefined
   const promise = new Promise<T>((resolve) => {
@@ -70,11 +79,16 @@ function deferred<T>(): { readonly promise: Promise<T>; readonly resolve: (value
 function createHarness() {
   const submissions: Array<ReturnType<typeof deferred<PaperTaskSubmitResult>>> = []
   const submitRequests: PaperTaskSubmitRequest[] = []
+  const observeRequests: Array<{
+    readonly request: Parameters<PaperTaskWorkbenchTransport['observe']>[0]
+    readonly result: ReturnType<typeof deferred<PaperTaskSubmitResult>>
+  }> = []
   const cancelRequests: string[] = []
   const deleteRequests: string[] = []
   let submitRequest: PaperTaskSubmitRequest | undefined
   let cancelResponse: unknown = { ok: false, code: 'cleanup-failed' }
   let deleteResponse: unknown = { ok: false, code: 'cleanup-failed' }
+  let historyResponse: unknown = []
   let lifecycle: PaperTaskWorkbenchLifecycleCallbacks | undefined
 
   const transport: PaperTaskWorkbenchTransport = {
@@ -84,6 +98,14 @@ function createHarness() {
       const submission = deferred<PaperTaskSubmitResult>()
       submissions.push(submission)
       return submission.promise
+    },
+    async history() {
+      return historyResponse
+    },
+    observe(request) {
+      const observation = deferred<PaperTaskSubmitResult>()
+      observeRequests.push({ request, result: observation })
+      return observation.promise
     },
     async cancel(taskId) {
       cancelRequests.push(taskId)
@@ -106,6 +128,7 @@ function createHarness() {
   return {
     workbench,
     submitRequests,
+    observeRequests,
     cancelRequests,
     deleteRequests,
     emit(event: PaperTaskEvent) {
@@ -122,6 +145,9 @@ function createHarness() {
     setCancelResponse(response: unknown) {
       cancelResponse = response
     },
+    setHistory(response: unknown) {
+      historyResponse = response
+    },
     setDeleteResponse(response: unknown) {
       deleteResponse = response
     },
@@ -130,6 +156,24 @@ function createHarness() {
         throw new Error('Lifecycle callbacks have not been registered.')
       }
       lifecycle.dispose()
+    },
+    mount() {
+      if (lifecycle === undefined) throw new Error('Lifecycle callbacks have not been registered.')
+      lifecycle.mounted()
+    },
+    pageHide() {
+      if (lifecycle === undefined) throw new Error('Lifecycle callbacks have not been registered.')
+      lifecycle.pageHide()
+    },
+    emitObservation(event: PaperTaskEvent, index = 0) {
+      const observation = observeRequests[index]
+      if (observation === undefined) throw new Error('Task observation has not started.')
+      observation.request.onEvent(event)
+    },
+    resolveObservation(result: PaperTaskSubmitResult, index = 0) {
+      const observation = observeRequests[index]
+      if (observation === undefined) throw new Error('Task observation has not started.')
+      observation.result.resolve(result)
     },
     get signal(): AbortSignal | undefined {
       return submitRequest?.signal
@@ -154,6 +198,43 @@ describe('paper-task workbench', () => {
     const harness = createHarness()
 
     expect(harness.workbench.previewCards.value).toEqual([])
+  })
+
+  it('reopens an existing task from history and keeps observation failure distinct from task failure', async () => {
+    const harness = createHarness()
+    harness.setHistory([HISTORY_ENTRY])
+    await harness.workbench.handleRefreshHistory()
+
+    expect(harness.workbench.history.value).toEqual([HISTORY_ENTRY])
+    const firstObservation = harness.workbench.handleOpenHistory(TASK_ID)
+    expect(harness.observeRequests[0]?.request.taskId).toBe(TASK_ID)
+    expect(harness.workbench.phase.value).toBe('running')
+    harness.emitObservation(ACCEPTED)
+    harness.emitObservation(TRANSLATION_PREVIEW)
+    harness.resolveObservation(EOF_OUTCOME)
+    await firstObservation
+
+    expect(harness.workbench.observationFailed.value).toBe(true)
+    expect(harness.workbench.phase.value).toBe('error')
+    expect(harness.workbench.errorMessage.value).toContain('不会因此停止任务')
+    expect(harness.workbench.taskId.value).toBe(TASK_ID)
+
+    const reconnect = harness.workbench.handleReconnect()
+    expect(harness.observeRequests).toHaveLength(2)
+    harness.emitObservation(ACCEPTED, 1)
+    harness.emitObservation(TRANSLATION_PREVIEW, 1)
+    harness.emitObservation(SUCCESSFUL_TERMINAL, 1)
+    harness.resolveObservation({
+      kind: 'stream',
+      outcome: { kind: 'terminal', terminal: SUCCESSFUL_TERMINAL },
+    }, 1)
+    await reconnect
+
+    expect(harness.submitRequests).toHaveLength(0)
+    expect(harness.cancelRequests).toHaveLength(0)
+    expect(harness.workbench.phase.value).toBe('result')
+    expect(harness.workbench.observationFailed.value).toBe(false)
+    expect(harness.workbench.previewCards.value[0]?.paragraphs).toEqual(TRANSLATION_PREVIEW.paragraphs)
   })
 
   it('consumes the selected PDF at submission and does not reuse it after a result', async () => {
@@ -450,7 +531,7 @@ describe('paper-task workbench', () => {
     expect(harness.workbench.previewCards.value).toEqual([])
   })
 
-  it('aborts active submission through the injected cleanup hook', async () => {
+  it('detaches the observation on disposal without sending a cancel request', async () => {
     const harness = createHarness()
     const submission = harness.workbench.handleSubmit()
     harness.emit(ACCEPTED)
@@ -458,7 +539,22 @@ describe('paper-task workbench', () => {
     harness.dispose()
 
     expect(harness.signal?.aborted).toBe(true)
+    expect(harness.cancelRequests).toEqual([])
     harness.resolveSubmission(EOF_OUTCOME)
     await submission
+  })
+
+  it('detaches on pagehide without converting navigation into an explicit stop', async () => {
+    const harness = createHarness()
+    const submission = harness.workbench.handleSubmit()
+    harness.emit(ACCEPTED)
+
+    harness.pageHide()
+
+    expect(harness.signal?.aborted).toBe(true)
+    expect(harness.cancelRequests).toEqual([])
+    harness.resolveSubmission(EOF_OUTCOME)
+    await submission
+    expect(harness.workbench.taskId.value).toBe(TASK_ID)
   })
 })

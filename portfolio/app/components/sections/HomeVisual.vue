@@ -76,9 +76,16 @@
           <SectionsVerticalCategoryNav :categories="categories" density="hero" />
         </div>
 
-        <aside id="home-media-slot" data-testid="home-media-slot" class="home-visual__media" aria-label="Featured media">
-          <span class="home-visual__media-kicker">MEDIA</span>
-          <p>影像与声音记录，待作品整理后在此呈现。</p>
+        <aside
+          id="home-media-slot"
+          data-testid="home-media-slot"
+          class="home-visual__media"
+          :aria-label="mediaLabel ?? 'Featured media'"
+        >
+          <slot name="media">
+            <span class="home-visual__media-kicker">MEDIA</span>
+            <p>影像与声音记录，待作品整理后在此呈现。</p>
+          </slot>
         </aside>
       </div>
 
@@ -97,7 +104,12 @@
       </div>
     </div>
 
-    <a id="home-scroll-cue" data-testid="home-scroll-cue" class="home-visual__scroll" href="#information">
+    <a
+      id="home-scroll-cue"
+      data-testid="home-scroll-cue"
+      class="home-visual__scroll"
+      :href="scrollTarget ?? '#information'"
+    >
       <span>向下阅读</span>
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="m6 9 6 6 6-6" />
@@ -111,6 +123,8 @@ import type { PortalCategory } from '~/data/navigation'
 
 interface Props {
   readonly categories: readonly PortalCategory[]
+  readonly scrollTarget?: string
+  readonly mediaLabel?: string
 }
 
 const INTRO_MODE = {

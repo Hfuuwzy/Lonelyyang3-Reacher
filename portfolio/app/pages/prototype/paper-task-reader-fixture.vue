@@ -3,7 +3,7 @@
 </template>
 
 <script setup lang="ts">
-import PaperTaskReader from '~/components/prototype/PaperTaskReader.vue'
+import PaperTaskReader from '~/components/agents/PaperTaskReader.vue'
 import type { PaperTaskReaderView } from '~/utils/paper-task-reader-contract'
 
 definePageMeta({ layout: false })

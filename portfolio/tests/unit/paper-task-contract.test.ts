@@ -6,6 +6,7 @@ import {
   initialBranchStates,
   paperTaskActionResultSchema,
   paperTaskEventSchema,
+  paperTaskHistoryEntrySchema,
   validatePaperTaskEvent,
 } from '../../app/utils/paper-task-contract'
 
@@ -182,31 +183,73 @@ describe('validatePaperTaskEvent - terminal', () => {
     expect(validatePaperTaskEvent(duringCleanup, 'both')).toBe(true)
   })
 
+  it('accepts an interrupted terminal while preserving a complete sibling branch', () => {
+    expect(validatePaperTaskEvent(terminal({
+      outcome: 'interrupted',
+      branches: { translation: 'complete', 'deep-reading': 'interrupted' },
+    }), 'both')).toBe(true)
+  })
+
   it('rejects a cancelled terminal with an in-flight or not-selected selected branch', () => {
     expect(validatePaperTaskEvent(terminal({ outcome: 'cancelled', branches: { translation: 'running', 'deep-reading': 'sample-ready' } }), 'both')).toBe(false)
     expect(validatePaperTaskEvent(terminal({ outcome: 'cancelled', branches: { translation: 'pending', 'deep-reading': 'sample-ready' } }), 'both')).toBe(false)
     expect(validatePaperTaskEvent(terminal({ outcome: 'cancelled', branches: { translation: 'not-selected', 'deep-reading': 'sample-ready' } }), 'both')).toBe(false)
   })
 
-  it('requires a disconnected terminal to mark unfinished branches cancelled, never in-flight', () => {
-    const unfinishedCancelled = terminal({ outcome: 'disconnected', branches: { translation: 'cancelled', 'deep-reading': 'cancelled' } })
-    expect(validatePaperTaskEvent(unfinishedCancelled, 'both')).toBe(true)
-    const inFlight = terminal({ outcome: 'disconnected', branches: { translation: 'running', 'deep-reading': 'running' } })
-    expect(validatePaperTaskEvent(inFlight, 'both')).toBe(false)
-    const pending = terminal({ outcome: 'disconnected', branches: { translation: 'pending', 'deep-reading': 'sample-ready' } })
-    expect(validatePaperTaskEvent(pending, 'both')).toBe(false)
-  })
-
-  it('accepts a disconnected terminal with a failed or sample-ready branch alongside cancelled ones', () => {
-    const mixed = terminal({ outcome: 'disconnected', branches: { translation: 'cancelled', 'deep-reading': 'failed' } })
-    expect(validatePaperTaskEvent(mixed, 'both')).toBe(true)
-    const retained = terminal({ outcome: 'disconnected', branches: { translation: 'sample-ready', 'deep-reading': 'cancelled' } })
-    expect(validatePaperTaskEvent(retained, 'both')).toBe(true)
+  it('does not represent an observer disconnect as a task outcome', () => {
+    expect(validatePaperTaskEvent(terminal({ outcome: 'disconnected' }), 'translation')).toBe(false)
   })
 
   it('rejects an unknown outcome or cleanup value', () => {
     expect(validatePaperTaskEvent(terminal({ outcome: 'complete' }), 'translation')).toBe(false)
     expect(validatePaperTaskEvent(terminal({ cleanup: 'pending' }), 'translation')).toBe(false)
+  })
+})
+
+describe('paperTaskHistoryEntrySchema', () => {
+  it('accepts the bounded source, time, task status, and independent branch snapshot', () => {
+    expect(paperTaskHistoryEntrySchema.safeParse({
+      taskId: TASK_ID,
+      sourceTitle: 'paper.pdf',
+      createdAt: '2026-10-23T12:00:00.000Z',
+      selection: 'both',
+      status: 'running',
+      branches: { translation: 'running', 'deep-reading': 'pending' },
+    }).success).toBe(true)
+  })
+
+  it('accepts the explicit interrupted status without widening the public snapshot', () => {
+    expect(paperTaskHistoryEntrySchema.safeParse({
+      taskId: TASK_ID,
+      sourceTitle: 'paper.pdf',
+      createdAt: '2026-10-23T12:00:00.000Z',
+      selection: 'both',
+      status: 'interrupted',
+      branches: { translation: 'complete', 'deep-reading': 'interrupted' },
+    }).success).toBe(true)
+  })
+
+  it('rejects fields outside the public task-history snapshot', () => {
+    expect(paperTaskHistoryEntrySchema.safeParse({
+      taskId: TASK_ID,
+      sourceTitle: 'paper.pdf',
+      createdAt: '2026-10-23T12:00:00.000Z',
+      selection: 'translation',
+      status: 'success',
+      branches: { translation: 'complete', 'deep-reading': 'not-selected' },
+      apiKey: 'not-allowed',
+    }).success).toBe(false)
+  })
+
+  it('rejects extra branch keys instead of silently stripping them', () => {
+    expect(paperTaskHistoryEntrySchema.safeParse({
+      taskId: TASK_ID,
+      sourceTitle: 'paper.pdf',
+      createdAt: '2026-10-23T12:00:00.000Z',
+      selection: 'translation',
+      status: 'success',
+      branches: { translation: 'complete', 'deep-reading': 'not-selected', other: 'running' },
+    }).success).toBe(false)
   })
 })
 

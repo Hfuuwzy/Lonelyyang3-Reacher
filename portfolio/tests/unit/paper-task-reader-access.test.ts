@@ -1,15 +1,17 @@
 /// <reference types="node" />
 import { afterEach, describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readPaperTaskReader } from '../../server/paper-task/reader-access'
 import type { StoredSource } from '../../server/paper-task/source-store'
+import { paperTaskFragmentSchema } from '../../app/utils/paper-task-contract'
 import {
   paperTaskArtifactPath,
   paperTaskPdfPath,
   projectPaperTaskReaderView,
+  paperTaskReaderViewSchema,
 } from '../../app/utils/paper-task-reader-contract'
 
 const TASK_ID = '123e4567-e89b-12d3-a456-426614174000'
@@ -58,18 +60,90 @@ describe('paper task reader view', () => {
       'deep-reading': 'preview-ready',
     }, storedSource())
 
-    expect(view?.documents.map((document) => document.branch)).toEqual(['deep-reading'])
-    expect(view?.documents[0]?.status).toBe('needs-confirmation')
+    expect(view?.documents.map((document) => document.branch)).toEqual(['translation', 'deep-reading'])
+    expect(view?.documents[0]).toMatchObject({
+      status: 'fragment',
+      markdown: MASTER,
+      fragment: {
+        taskId: TASK_ID,
+        branch: 'translation',
+        identity: `sha256:${createHash('sha256').update(MASTER).digest('hex')}`,
+        source: 'drafts/translation/preview.md',
+        reason: 'branch-failed',
+      },
+    })
+    expect(view?.documents[1]?.status).toBe('needs-confirmation')
   })
 
-  it('does not surface a failed branch even when its files still exist', () => {
+  it('uses only a failed branch preview fragment even when its old master files still exist', () => {
     const root = fixture()
+    const preview = '# Saved fragment\n\nOnly the failed branch preview belongs in the reader.'
+    writeFileSync(join(root, 'drafts', 'deep-reading', 'preview.md'), preview)
     const view = readPaperTaskReader(TASK_ID, root, {
       translation: 'preview-ready',
       'deep-reading': 'failed',
     }, storedSource())
 
-    expect(view?.documents.map((document) => document.branch)).toEqual(['translation'])
+    expect(view?.documents.map((document) => document.branch)).toEqual(['translation', 'deep-reading'])
+    expect(view?.documents[1]).toMatchObject({
+      branch: 'deep-reading',
+      status: 'fragment',
+      markdown: preview,
+      fragment: {
+        reason: 'branch-failed',
+        source: 'drafts/deep-reading/preview.md',
+      },
+    })
+    expect(view?.documents[1]?.markdown).not.toBe(REPORT)
+  })
+
+  it('uses the matching branch canonical body as an explicitly sourced fragment when its preview mirror is absent', () => {
+    const root = fixture()
+    const previewPath = join(root, 'drafts', 'translation', 'preview.md')
+    rmSync(previewPath)
+
+    const view = readPaperTaskReader(TASK_ID, root, {
+      translation: 'failed',
+      'deep-reading': 'not-selected',
+    }, storedSource())
+
+    expect(view?.documents).toMatchObject([{
+      branch: 'translation',
+      status: 'fragment',
+      markdown: MASTER,
+      fragment: {
+        taskId: TASK_ID,
+        branch: 'translation',
+        source: 'drafts/translation/master.md',
+        reason: 'branch-failed',
+      },
+    }])
+    expect(view?.documents[0]?.status).not.toBe('complete')
+  })
+
+  it('never reads a canonical body from a sibling branch and rejects a symlinked canonical body', () => {
+    const wrongBranchRoot = fixture()
+    rmSync(join(wrongBranchRoot, 'drafts', 'translation', 'preview.md'))
+    rmSync(join(wrongBranchRoot, 'drafts', 'translation', 'master.md'))
+    writeFileSync(join(wrongBranchRoot, 'drafts', 'deep-reading', 'report.md'), REPORT)
+    const wrongBranch = readPaperTaskReader(TASK_ID, wrongBranchRoot, {
+      translation: 'failed',
+      'deep-reading': 'not-selected',
+    }, storedSource())
+    expect(wrongBranch?.documents).toEqual([])
+
+    const symlinkRoot = fixture()
+    const translationRoot = join(symlinkRoot, 'drafts', 'translation')
+    rmSync(join(translationRoot, 'preview.md'))
+    rmSync(join(translationRoot, 'master.md'))
+    const externalPath = join(symlinkRoot, 'outside.md')
+    writeFileSync(externalPath, MASTER)
+    symlinkSync(externalPath, join(translationRoot, 'master.md'), 'file')
+    const symlinked = readPaperTaskReader(TASK_ID, symlinkRoot, {
+      translation: 'failed',
+      'deep-reading': 'not-selected',
+    }, storedSource())
+    expect(symlinked?.documents).toEqual([])
   })
 
   it('marks a stale translation with a short actionable notice', () => {
@@ -130,6 +204,8 @@ describe('paper task reader view', () => {
     }, storedSource())
 
     expect(view?.pdfs.translated.available).toBe(false)
+    expect(view?.pdfs.translated.message).toContain('待确认')
+    expect(view?.pdfs.translated.message).toContain('Markdown')
   })
 
   it('projects only the matching task UUID', () => {
@@ -140,6 +216,45 @@ describe('paper task reader view', () => {
     }, storedSource())
     expect(projectPaperTaskReaderView(view, TASK_ID)).toEqual(view)
     expect(projectPaperTaskReaderView(view, '123e4567-e89b-12d3-a456-426614174001')).toBeNull()
+  })
+
+  it('requires fragment provenance to match the task and branch and rejects incomplete or forged fragment metadata', () => {
+    const root = fixture()
+    const base = readPaperTaskReader(TASK_ID, root, {
+      translation: 'preview-ready',
+      'deep-reading': 'not-selected',
+    }, storedSource())
+    const document = base?.documents[0]
+    if (base === undefined || document === undefined) throw new Error('reader fixture unavailable')
+    const fragment = {
+      taskId: TASK_ID,
+      branch: 'translation',
+      identity: `sha256:${'c'.repeat(64)}`,
+      source: 'drafts/translation/preview.md',
+      reason: 'branch-failed',
+      quality: null,
+    }
+    const valid = {
+      ...base,
+      documents: [{ ...document, status: 'fragment', fragment }],
+    }
+    expect(paperTaskReaderViewSchema.safeParse(valid).success).toBe(true)
+
+    const malformedDocuments = [
+      { ...document, status: 'fragment' },
+      { ...document, status: 'fragment', fragment: { ...fragment, taskId: '123e4567-e89b-12d3-a456-426614174001' } },
+      { ...document, status: 'fragment', fragment: { ...fragment, branch: 'deep-reading' } },
+      { ...document, status: 'fragment', fragment: { ...fragment, source: 'drafts/deep-reading/preview.md' } },
+      { ...document, status: 'fragment', fragment: { ...fragment, source: 'drafts/translation/report.md' } },
+      { ...document, status: 'fragment', fragment: { ...fragment, source: 'drafts/translation/../../source.md' } },
+      { ...document, status: 'fragment', fragment: { ...fragment, identity: 'not-a-content-digest' } },
+      { ...document, status: 'preview', fragment },
+    ]
+    for (const malformed of malformedDocuments) {
+      expect(paperTaskReaderViewSchema.safeParse({ ...base, documents: [malformed] }).success).toBe(false)
+    }
+    expect(paperTaskFragmentSchema.safeParse({ ...fragment, source: 'drafts/translation/master.md' }).success).toBe(true)
+    expect(paperTaskFragmentSchema.safeParse({ ...fragment, source: 'drafts/deep-reading/report.md' }).success).toBe(false)
   })
 
   it('uses one PDF route family so translated open and download resolve the same file', () => {

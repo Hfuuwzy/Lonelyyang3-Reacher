@@ -38,6 +38,34 @@ afterEach(async () => {
 })
 
 describe('pinned DSH task terminal cleanup', () => {
+  it('retains a safe diagnostic when selected branch resources are unavailable before runtime startup', async () => {
+    const fixture = await setup('hold')
+    const previousResourceRoot = process.env.PAPER_TASK_DEEP_READING_SKILL_ROOT
+    process.env.PAPER_TASK_DEEP_READING_SKILL_ROOT = join(fixture.root, 'missing-deep-reading-skill')
+    try {
+      const submitted = await fixture.service.submit({ pdf: new Uint8Array([37, 80, 68, 70]), selection: 'deep-reading' })
+      if (!submitted.ok) throw new Error('fixture task was not accepted')
+      const events: PaperTaskEvent[] = []
+      for await (const event of submitted.events) events.push(event)
+
+      expect(events.at(-1)).toMatchObject({ type: 'terminal', outcome: 'failed', cleanup: 'clean', branches: { 'deep-reading': 'failed' } })
+      const errorPath = join(fixture.root, 'project-local', TASK_ID, 'drafts', 'deep-reading', 'runtime-error.json')
+      expect(existsSync(errorPath)).toBe(true)
+      const runtimeError = JSON.parse(readFileSync(errorPath, 'utf8')) as Record<string, unknown>
+      expect(runtimeError).toMatchObject({
+        branch: 'deep-reading',
+        stage: 'preflight',
+        code: 'GENERATION_RESOURCES_UNAVAILABLE',
+        message: 'The selected branch did not start because its local skill resources are unavailable or invalid. Check the local skill configuration and retry.',
+      })
+      expect(JSON.stringify(runtimeError)).not.toContain(MARKER)
+      expect(providerRequests.find((entry) => entry.root === fixture.root)?.requests).toHaveLength(0)
+    } finally {
+      if (previousResourceRoot === undefined) delete process.env.PAPER_TASK_DEEP_READING_SKILL_ROOT
+      else process.env.PAPER_TASK_DEEP_READING_SKILL_ROOT = previousResourceRoot
+    }
+  }, 45000)
+
   it('sanitizes provider failure and removes its real runtime while retaining the task', async () => {
     const fixture = await setup('failure')
     const submitted = await fixture.service.submit({ pdf: new Uint8Array([37, 80, 68, 70]), selection: 'translation' })

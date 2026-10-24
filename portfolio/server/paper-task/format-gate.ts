@@ -9,7 +9,7 @@ export type PaperTaskBranchQualityState = 'preview' | 'needs-confirmation' | 'co
 export function paperTaskBranchQuality(state: PaperTaskState): PaperTaskBranchQualityState {
   if (state === 'complete') return 'complete'
   if (state === 'needs-confirmation') return 'needs-confirmation'
-  if (state === 'failed' || state === 'cancelled' || state === 'not-selected') return 'failed'
+  if (state === 'failed' || state === 'cancelled' || state === 'interrupted' || state === 'not-selected') return 'failed'
   return 'preview'
 }
 

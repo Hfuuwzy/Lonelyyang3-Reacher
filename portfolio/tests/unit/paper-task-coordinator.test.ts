@@ -14,7 +14,7 @@ import { validatePaperTaskEvent, type PaperTaskBranch, type PaperTaskEvent } fro
 
 const TASK_ID = '123e4567-e89b-12d3-a456-426614174000'
 
-const PDF_BYTES = new Uint8Array([0x25, 0x50, 0x44, 0x46, 1, 2, 3])
+const PDF_BYTES = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37, 0x0a, 1, 2, 3])
 
 const PAGE: ExtractedPaperPage = {
   readerPage: 1,
@@ -39,6 +39,7 @@ interface FakeRuntimeSpec {
   readonly hang?: boolean
   readonly ok?: boolean
   readonly closeOk?: boolean
+  readonly closeFailsOnce?: boolean
   readonly closeGate?: Promise<void>
   readonly closeThrows?: boolean
 }
@@ -82,6 +83,7 @@ function makeFakeRuntime(spec: FakeRuntimeSpec): { runtime: PaperTaskRuntime; ha
       if (spec.closeThrows === true) {
         throw new Error('close failed')
       }
+      if (spec.closeFailsOnce === true && handle.closeCalls === 1) return { ok: false }
       return { ok: spec.closeOk ?? true }
     },
   }
@@ -195,6 +197,45 @@ describe('paper-task coordinator submit', () => {
       expect(terminal.branches).toEqual({ translation: 'sample-ready', 'deep-reading': 'not-selected' })
       expect(terminal.cleanup).toBe('clean')
     }
+  })
+
+  it('runs without a subscriber and retains separate task history and replayable results', async () => {
+    const { factory, handles } = fakeRuntimeFactory([
+      { branch: 'translation', events: [{ type: 'preview', paragraphs: ['第一篇论文的样例。'] }] },
+      { branch: 'deep-reading', events: [{ type: 'preview', paragraphs: ['第二篇论文的样例。'] }], ok: false },
+    ])
+    const ids = [TASK_ID, '223e4567-e89b-12d3-a456-426614174000']
+    const root = mkdtempSync(join(tmpdir(), 'paper-task-history-'))
+    roots.push(root)
+    const svc = createPaperTaskService({
+      projectRoot: root,
+      runtimeFactory: factory,
+      prepareSource: extractor(SUCCESS_EXTRACTION),
+      createId: () => ids.shift() ?? '323e4567-e89b-12d3-a456-426614174000',
+    })
+
+    const first = await svc.submit(input('translation'), { sourceTitle: 'first-paper.pdf' })
+    const second = await svc.submit(input('deep-reading'), { sourceTitle: 'second-paper.pdf' })
+    expect(first.ok).toBe(true)
+    expect(second.ok).toBe(true)
+    if (!first.ok || !second.ok) return
+
+    // Neither submission stream has been consumed. The service owns both jobs.
+    await waitFor(() => svc.history().some((task) => task.taskId === first.taskId && task.status === 'success'))
+    await waitFor(() => svc.history().some((task) => task.taskId === second.taskId && task.status === 'fail'))
+
+    const replayedFirst = await collect(svc.events(first.taskId)!)
+    expect(replayedFirst.map((event) => event.type)).toContain('preview')
+    expect(terminalOf(replayedFirst)).toMatchObject({ outcome: 'succeeded' })
+
+    const history = svc.history()
+    expect(history.map(({ taskId, sourceTitle, status }) => ({ taskId, sourceTitle, status }))).toEqual([
+      { taskId: second.taskId, sourceTitle: 'second-paper.pdf', status: 'fail' },
+      { taskId: first.taskId, sourceTitle: 'first-paper.pdf', status: 'success' },
+    ])
+    expect(history.every((task) => Number.isFinite(Date.parse(task.createdAt)))).toBe(true)
+    expect(history[0]?.branches).toEqual({ translation: 'not-selected', 'deep-reading': 'failed' })
+    expect(handles).toHaveLength(2)
   })
 
   it('emits only events valid for the selected branches', async () => {
@@ -330,11 +371,12 @@ describe('paper-task coordinator deletion', () => {
     expect(existsSync(join(root, 'project-local', TASK_ID))).toBe(false)
   })
 
-  it('stops an active task, awaits cleanup, then deletes the workspace', async () => {
+  it('stops an active task, waits for runtime cleanup to settle, then deletes the workspace', async () => {
     const root = mkdtempSync(join(tmpdir(), 'paper-task-active-delete-'))
     roots.push(root)
-    const { factory } = fakeRuntimeFactory([
-      { branch: 'translation', events: [], hang: true },
+    const closeGate = deferred()
+    const { factory, handles } = fakeRuntimeFactory([
+      { branch: 'translation', events: [], hang: true, closeGate: closeGate.promise },
     ])
     const svc = createPaperTaskService({
       projectRoot: root,
@@ -347,9 +389,147 @@ describe('paper-task coordinator deletion', () => {
       throw new Error('submit failed')
     }
     const { done } = startCollecting(submission.events)
-    const removeResult = await svc.remove(TASK_ID)
+    const removal = svc.remove(TASK_ID)
+    await waitFor(() => handles[0]?.closeCalls === 1)
+    let removalSettled = false
+    void removal.then(() => { removalSettled = true })
+    await Promise.resolve()
+    expect(removalSettled).toBe(false)
+    expect(existsSync(join(root, 'project-local', TASK_ID, 'original.pdf'))).toBe(true)
+
+    closeGate.resolve()
+    const removeResult = await removal
     expect(removeResult).toEqual({ ok: true, code: 'deleted' })
     await done
+    expect(existsSync(join(root, 'project-local', TASK_ID))).toBe(false)
+  })
+
+  it('removes task-owned data from public reads and disk without affecting other jobs or downloads', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'paper-task-delete-public-'))
+    roots.push(root)
+    const otherTaskId = '223e4567-e89b-12d3-a456-426614174000'
+    const otherTaskRoot = join(root, 'project-local', otherTaskId)
+    const downloadsRoot = join(root, 'downloads')
+    mkdirSync(otherTaskRoot, { recursive: true })
+    mkdirSync(downloadsRoot, { recursive: true })
+    writeFileSync(join(otherTaskRoot, 'original.pdf'), 'other task')
+    writeFileSync(join(downloadsRoot, 'saved.md'), 'user download')
+
+    const { factory } = fakeRuntimeFactory([
+      { branch: 'translation', events: [{ type: 'preview', paragraphs: ['任务资料'] }], ok: true },
+    ])
+    const svc = createPaperTaskService({
+      projectRoot: root,
+      runtimeFactory: factory,
+      prepareSource: extractor(SUCCESS_EXTRACTION),
+      createId: () => TASK_ID,
+    })
+    const submission = await svc.submit(input('translation'))
+    if (!submission.ok) throw new Error('submit failed')
+    await collect(submission.events)
+
+    const ownedRoot = join(root, 'project-local', TASK_ID)
+    writeFileSync(join(ownedRoot, 'drafts', 'translation', 'owned-artifact.md'), 'owned artifact')
+    const staleRuntimeHome = join(root, 'runtime-local', TASK_ID, 'translation')
+    mkdirSync(staleRuntimeHome, { recursive: true })
+    writeFileSync(join(staleRuntimeHome, 'owned-runtime-data'), 'runtime data')
+    expect(svc.history()).toHaveLength(1)
+    expect(svc.events(TASK_ID)).toBeDefined()
+    expect(svc.source(TASK_ID)).toBeDefined()
+    expect(svc.originalPdf(TASK_ID)).toEqual(PDF_BYTES)
+
+    expect(await svc.remove('../../' + otherTaskId)).toEqual({ ok: false, code: 'not-found' })
+    expect(existsSync(join(otherTaskRoot, 'original.pdf'))).toBe(true)
+    expect(existsSync(ownedRoot)).toBe(true)
+
+    expect(await svc.remove(TASK_ID)).toEqual({ ok: true, code: 'deleted' })
+    expect(svc.history()).toEqual([])
+    expect(svc.events(TASK_ID)).toBeUndefined()
+    expect(svc.source(TASK_ID)).toBeUndefined()
+    expect(svc.translation(TASK_ID)).toBeUndefined()
+    expect(svc.reader(TASK_ID)).toBeUndefined()
+    expect(svc.originalPdf(TASK_ID)).toBeUndefined()
+    expect(svc.translatedPdf(TASK_ID)).toBeUndefined()
+    expect(svc.asset(TASK_ID, 'asset-00000000000000000000000000000000')).toBeUndefined()
+    expect(existsSync(ownedRoot)).toBe(false)
+    expect(existsSync(join(root, 'runtime-local', TASK_ID))).toBe(false)
+    expect(existsSync(join(otherTaskRoot, 'original.pdf'))).toBe(true)
+    expect(existsSync(join(downloadsRoot, 'saved.md'))).toBe(true)
+
+    const afterRestart = createPaperTaskService({ projectRoot: root, runtimeFactory: factory })
+    expect(afterRestart.history()).toEqual([])
+    expect(afterRestart.source(TASK_ID)).toBeUndefined()
+    expect(afterRestart.originalPdf(TASK_ID)).toBeUndefined()
+  })
+
+  it('keeps failed workspace cleanup traceable and allows a later service to retry deletion', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'paper-task-delete-retry-'))
+    roots.push(root)
+    const { factory } = fakeRuntimeFactory([
+      { branch: 'translation', events: [{ type: 'preview', paragraphs: ['保留资料'] }], ok: true },
+    ])
+    let failCleanup = true
+    const removeWorkspace = (workspaceRoot: string) => {
+      if (failCleanup) {
+        failCleanup = false
+        throw new Error('injected workspace cleanup failure')
+      }
+      rmSync(workspaceRoot, { recursive: true, force: true })
+    }
+    const svc = createPaperTaskService({
+      projectRoot: root,
+      runtimeFactory: factory,
+      prepareSource: extractor(SUCCESS_EXTRACTION),
+      createId: () => TASK_ID,
+      removeWorkspace,
+    })
+    const submission = await svc.submit(input('translation'))
+    if (!submission.ok) throw new Error('submit failed')
+    await collect(submission.events)
+
+    expect(await svc.remove(TASK_ID)).toEqual({ ok: false, code: 'cleanup-failed' })
+    expect(svc.history()).toHaveLength(1)
+    expect(svc.history()[0]).toMatchObject({ taskId: TASK_ID, deletionPending: true })
+    expect(svc.source(TASK_ID)).toBeDefined()
+    expect(svc.originalPdf(TASK_ID)).toEqual(PDF_BYTES)
+    expect(existsSync(join(root, 'project-local', TASK_ID, 'original.pdf'))).toBe(true)
+
+    const restored = createPaperTaskService({ projectRoot: root, runtimeFactory: factory, removeWorkspace })
+    expect(restored.history()).toMatchObject([{ taskId: TASK_ID, deletionPending: true }])
+    expect(restored.source(TASK_ID)).toBeDefined()
+    expect(restored.originalPdf(TASK_ID)).toEqual(PDF_BYTES)
+    expect(existsSync(join(root, 'project-local', TASK_ID, 'original.pdf'))).toBe(true)
+    expect(await restored.remove(TASK_ID)).toEqual({ ok: true, code: 'deleted' })
+    expect(restored.history()).toEqual([])
+    expect(restored.source(TASK_ID)).toBeUndefined()
+    expect(existsSync(join(root, 'project-local', TASK_ID))).toBe(false)
+
+    const afterRetry = createPaperTaskService({ projectRoot: root, runtimeFactory: factory })
+    expect(afterRetry.history()).toEqual([])
+    expect(afterRetry.source(TASK_ID)).toBeUndefined()
+    expect(afterRetry.originalPdf(TASK_ID)).toBeUndefined()
+    expect(existsSync(join(root, 'project-local', TASK_ID))).toBe(false)
+  })
+
+  it('retries a transient runtime cleanup failure before deleting task data', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'paper-task-runtime-delete-retry-'))
+    roots.push(root)
+    const { factory } = fakeRuntimeFactory([
+      { branch: 'translation', events: [{ type: 'preview', paragraphs: ['清理可重试'] }], closeFailsOnce: true },
+    ])
+    const svc = createPaperTaskService({
+      projectRoot: root,
+      runtimeFactory: factory,
+      prepareSource: extractor(SUCCESS_EXTRACTION),
+      createId: () => TASK_ID,
+    })
+    const submission = await svc.submit(input('translation'))
+    if (!submission.ok) throw new Error('submit failed')
+    await collect(submission.events)
+
+    expect(await svc.remove(TASK_ID)).toEqual({ ok: true, code: 'deleted' })
+    expect(svc.history()).toEqual([])
+    expect(svc.source(TASK_ID)).toBeUndefined()
     expect(existsSync(join(root, 'project-local', TASK_ID))).toBe(false)
   })
 
@@ -378,16 +558,15 @@ describe('paper-task coordinator deletion', () => {
     expect(await cancel).toEqual({ ok: true, code: 'stopped' })
   })
 
-  it('does not start a never-consumed task after cancellation finalizes it', async () => {
+  it('starts accepted work without a subscriber and explicit cancellation awaits cleanup', async () => {
     const root = mkdtempSync(join(tmpdir(), 'paper-task-unconsumed-cancel-'))
     roots.push(root)
-    let factoryCalls = 0
+    const { factory, handles } = fakeRuntimeFactory([
+      { branch: 'translation', events: [{ type: 'preview', paragraphs: ['取消前保留的预览。'] }], hang: true },
+    ])
     const svc = createPaperTaskService({
       projectRoot: root,
-      runtimeFactory: () => {
-        factoryCalls += 1
-        throw new Error('runtime factory must stay fenced')
-      },
+      runtimeFactory: factory,
       prepareSource: extractor(SUCCESS_EXTRACTION),
       createId: () => TASK_ID,
     })
@@ -395,9 +574,18 @@ describe('paper-task coordinator deletion', () => {
     if (!submission.ok) {
       throw new Error('submit failed')
     }
+    await waitFor(() => handles.length === 1)
+    expect(svc.history()[0]).toMatchObject({
+      taskId: TASK_ID,
+      status: 'running',
+      branches: { translation: 'running', 'deep-reading': 'not-selected' },
+    })
+
     expect(await svc.cancel(TASK_ID)).toEqual({ ok: true, code: 'stopped' })
-    expect(await submission.events[Symbol.asyncIterator]().next()).toEqual({ done: true, value: undefined })
-    expect(factoryCalls).toBe(0)
+    const events = await collect(submission.events)
+    expect(terminalOf(events)).toMatchObject({ outcome: 'cancelled', branches: { translation: 'cancelled' } })
+    expect(svc.history()[0]).toMatchObject({ status: 'stopped', branches: { translation: 'cancelled' } })
+    expect(handles[0]?.closeCalls).toBeGreaterThan(0)
     expect(existsSync(join(root, 'runtime-local', TASK_ID))).toBe(false)
   })
 
@@ -453,7 +641,11 @@ describe('paper-task coordinator deletion', () => {
     await svc.cancel(TASK_ID)
     const collected = await done
     expect(collected.some((event) => event.type === 'preview' && event.branch === 'translation')).toBe(true)
-    expect(terminalOf(collected)).toMatchObject({ type: 'terminal', outcome: 'cancelled', branches: { translation: 'cancelled', 'deep-reading': 'failed' } })
+    expect(terminalOf(collected)).toMatchObject({
+      type: 'terminal',
+      outcome: 'cancelled',
+      branches: { translation: 'sample-ready', 'deep-reading': 'failed' },
+    })
     expect(handles).toHaveLength(1)
     expect(handles[0]?.closeCalls).toBeGreaterThan(0)
   })
@@ -553,11 +745,15 @@ describe('paper-task independent branches and early return', () => {
     const previewIndex = events.findIndex((e) => e.type === 'preview')
     expect(previewIndex).toBeGreaterThan(-1)
     expect(events.some((e) => e.type === 'terminal')).toBe(false)
+    expect(svc.history()[0]).toMatchObject({
+      status: 'running',
+      branches: { translation: 'sample-ready', 'deep-reading': 'running' },
+    })
     await svc.cancel(TASK_ID)
     await done
   })
 
-  it('closes every runtime when the consumer returns early', async () => {
+  it('keeps runtimes alive when one observer returns early; explicit cancel closes them', async () => {
     const { factory, handles } = fakeRuntimeFactory([
       { branch: 'translation', events: [{ type: 'preview', paragraphs: ['预览'] }], hang: true },
     ])
@@ -574,12 +770,93 @@ describe('paper-task independent branches and early return', () => {
     if (iterator.return === undefined) throw new Error('task iterator must support early return')
     await iterator.return()
     for (const handle of handles) {
+      expect(handle.closeCalls).toBe(0)
+    }
+    expect(svc.history()[0]).toMatchObject({
+      status: 'running',
+      branches: { translation: 'sample-ready', 'deep-reading': 'not-selected' },
+    })
+    expect(await svc.cancel(TASK_ID)).toEqual({ ok: true, code: 'stopped' })
+    for (const handle of handles) {
       expect(handle.closeCalls).toBeGreaterThan(0)
     }
   })
 })
 
 describe('paper-task artifact retrieval after source correction', () => {
+  it('serves each selected task branch as its own full reader Markdown and download artifact', async () => {
+    const markdownByBranch = {
+      translation: '# 翻译主稿\n\n翻译正文第一段。\n\n## 完整方法\n\n翻译正文第二段。',
+      'deep-reading': '# 深读报告\n\n报告正文第一段。\n\n## 研究边界\n\n报告正文第二段。',
+    } as const
+    const factory: PaperTaskRuntimeFactory = (options) => {
+      const branch = options.branch
+      const markdown = markdownByBranch[branch]
+      const directory = options.branchWorkspaceDir
+      if (directory === undefined) throw new Error('branch workspace unavailable')
+
+      if (branch === 'translation') {
+        writeFileSync(join(directory, 'master.md'), markdown)
+        writeFileSync(join(directory, 'translation.json'), JSON.stringify({
+          version: 1,
+          status: 'complete',
+          sourceRevision: 1,
+          masterSha256: createHash('sha256').update(markdown).digest('hex'),
+          segments: [{
+            index: 0,
+            markdown,
+            stale: false,
+            dependencies: [{ recordId: 'p1-r0', revision: 1 }, { recordId: 'p1-r1', revision: 1 }],
+          }],
+          assets: [],
+          unresolved: [],
+        }))
+      } else {
+        writeFileSync(join(directory, 'report.md'), markdown)
+        writeFileSync(join(directory, 'preview.md'), markdown)
+        writeFileSync(join(directory, 'evidence.json'), JSON.stringify({
+          manuscriptSha256: createHash('sha256').update(markdown).digest('hex'),
+          status: 'needs-confirmation',
+          claims: [],
+          assets: [],
+          uncompletedReasons: [],
+          unresolvedRecordIds: [],
+          unverifiedAssetIds: [],
+        }))
+      }
+
+      return {
+        events: async function* () {
+          yield {
+            type: 'generated-preview',
+            markdown,
+            paragraphs: [markdown],
+            quality: { status: 'needs-confirmation', issues: [], options: [] },
+          }
+        },
+        result: Promise.resolve({ ok: true }),
+        close: async () => ({ ok: true }),
+      }
+    }
+    const svc = service({ factory })
+    const submission = await svc.submit({ pdf: new Uint8Array(Buffer.from('%PDF-1.4\nfixture')), selection: 'both' })
+    if (!submission.ok) throw new Error('submit failed')
+    await collect(submission.events)
+
+    const reader = svc.reader(TASK_ID)
+    expect(reader?.taskId).toBe(TASK_ID)
+    expect(reader?.documents.map(({ branch, markdown }) => ({ branch, markdown }))).toEqual([
+      { branch: 'translation', markdown: markdownByBranch.translation },
+      { branch: 'deep-reading', markdown: markdownByBranch['deep-reading'] },
+    ])
+
+    for (const branch of ['translation', 'deep-reading'] as const) {
+      const built = await svc.buildArtifacts(TASK_ID, branch, ['markdown'])
+      expect(built?.documents.find((document) => document.branch === branch)?.markdown).toBe(markdownByBranch[branch])
+      expect(svc.artifact(TASK_ID, branch, 'markdown')?.toString('utf8')).toBe(markdownByBranch[branch])
+    }
+  })
+
   it('blocks final retrieval of an inspected PDF after its complete translation master becomes stale', async () => {
     const master = '# 完整译文\n\n本文完整说明了研究问题、研究方法、实验结果、数据解释和研究结论。'
     const originalPdf = new Uint8Array(Buffer.from('%PDF-1.4\noriginal fixture'))
