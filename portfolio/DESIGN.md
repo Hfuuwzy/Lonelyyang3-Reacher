@@ -2,7 +2,7 @@
 
 ## 0. 参考合同
 
-本设计系统记录已确认的页面结构、交互和材质方向。文中标为“观测值”的尺寸用于校准响应式实现，设计令牌和 CSS 表达均为近似值，不构成像素级复刻承诺。参考站品牌、Logo、角色、插画、纸张图片、原站文案与社交资产均不得复制或下载到成品；加载 Logo 的五张图片分别承载 `lonely`、`yang`、`3`、coral icon、vertical `LONELYYANG3` wordmark，全部是用户拥有的预定位透明 RGBA PNG，不含任何参考站图片字节。材质只能用本站既有 CSS 纸张令牌重建。除已在 `ASSET-SOURCES.md` 记录权利来源的用户提供或生成品牌图片外，现有开发期临时占位素材最终上线前必须替换为用户拥有权利或明确获授权的图片。
+本设计系统记录已确认的页面结构、交互和材质方向。文中标为“观测值”的尺寸用于校准响应式实现，设计令牌和 CSS 表达均为近似值，不构成像素级复刻承诺。参考站品牌、Logo、角色、插画、纸张图片、原站文案与社交资产不得被视为已获权利的公开成品素材。加载 Logo 的五张图片分别承载 `lonely`、`yang`、`3`、coral icon、vertical `LONELYYANG3` wordmark，全部是用户拥有的预定位透明 RGBA PNG，不含任何参考站图片字节。材质原则上使用本站既有 CSS 纸张令牌；#66 首页使用用户提供并由 AI 生成的 `reference/asset-sources/home-wash-ai.png` 及其运行时副本 `public/images/prototype/home-wash.png`，不再包含 ref1 衍生预览图。除已在 `ASSET-SOURCES.md` 记录权利来源的用户提供或生成品牌图片外，现有开发期临时占位素材最终上线前必须替换为用户拥有权利或明确获授权的图片。
 
 ### 0.1 标注编号
 
@@ -10,11 +10,11 @@
 |---|---|---|
 | `H-01` | 左上品牌区域 | 用户提供的 `Lonelyyang3` 墨迹主字标与独立双语副品牌图片组成的双图品牌栈 |
 | `H-03` | 左侧分类区域 | 八个分类的竖排入口 |
-| `H-04` | 左下媒体区域 | 无媒体时显示和纸占位，有媒体时显示封面与播放入口 |
+| `H-04` | 左侧 Agent 导览 | 真实 DOM 链接至 A 开放工具展台；intro settled 前不可交互 |
 | `H-05` | 右侧窄轨 | 固定右侧导航轨与菜单触发器 |
-| `H-06` | 左侧信息区与右侧主视觉 | 内容壳使用约 `575fr / 1211fr` 双轨，并在两轨间保留响应式 `24–39px` 间隙；固定右轨不计入轨道比例 |
+| `H-06` | 首页品牌与右侧主视觉 | 桌面按响应式 viewport 几何叠放品牌信息与完整主图；`2560×1440` 观测主图左缘约 `768px`、宽约 `1617.06px`，不含独立固定右轨 |
 | `H-07` | 右侧窄轨中段与底部 | 菜单触发器在轨内垂直居中，社交链接固定在轨底部 |
-| `H-08` | `1920×2566` 完整主视觉至 INFORMATION | 主视觉完整显示后，仅在其底缘形成浅斜向纸层重叠与阴影，再进入 INFORMATION；不做水平硬切或中途裁切 |
+| `H-08` | `1920×2566` 完整主视觉至工具展台 | 主视觉完整显示后，仅在其底缘形成浅斜向纸层重叠与阴影，再进入工具展台；不做水平硬切或中途裁切 |
 | `N-01` | 桌面抽屉 | 目标宽度约 `690px` 的竖排分类抽屉，分类均可点击且内容可在内部滚动 |
 | `F-01` | INFORMATION 左栏 | 按日期倒序的文章时间线左列 |
 | `F-02` | INFORMATION 右栏 | 同一时间线的右列，不得重复左列文章 |
@@ -44,7 +44,7 @@
 | `--wagashi` | `#ead8ad` | 米黄棋盘纹样 |
 | `--rule` | `rgba(42, 12, 0, 0.34)` | 点线分隔符 |
 | `--nav-paper` | `rgba(250, 248, 242, 0.97)` | 导航轨与抽屉 |
-| `--home-watercolor` | 多层 `radial-gradient()`，朱红/粉色位于左上，淡黄/淡绿/淡蓝向下扩散，并覆以 `paper-grain` | 首页左侧连续水彩纸面 |
+| `--home-watercolor` | 用户生成的 `public/images/prototype/home-wash.png`；2000×1002 | 首页连续底材；不依赖 ref1 截图衍生背景 |
 | `--paper-surface-depth` | 暖纸遮罩 + `--paper-texture` | 桌面内容页的低对比纸纤维层 |
 | `--ink-impression` | 墨色 18% 的亚像素压印 | 开放式内容页的轻微吸墨深度 |
 
@@ -73,7 +73,7 @@
 - `asanoha`：淡粉麻叶圆形纹样。
 - `checker`：淡绿或米黄棋盘圆形纹样。
 - `petal`：稀疏花瓣，仅作为静态背景或极轻微漂移；开启 `prefers-reduced-motion` 时完全静止。
-- `home-watercolor`：令牌化的多重径向水彩与纸纤维层，左上为朱红和粉色，向下过渡到淡黄、淡绿、淡蓝；它是左侧信息面的连续底材，不得替换为单色、渐变 SaaS 面板或位图复制品。
+- `home-watercolor`：用户生成并提供的水彩纸面（`home-wash.png`，2000×1002）；生产首页使用该用户拥有权利的图像，不再加载 ref1 截图衍生预览图。
 
 ## 3. 字体系统
 
@@ -88,18 +88,18 @@
 
 ### 4.0 首页实现令牌
 
-以下令牌是本轮首页实现的唯一几何与动效来源；不得在组件内另写同义魔法值。
+以下令牌记录全局 HomeVisual 默认几何与动效。当前生产首页的桌面重叠布局只使用页面作用域 `home-page.css` 中的 `--home-desktop-*` 几何令牌；不复用已废弃的不相交双轨观测值。
 
 | 令牌 | 值 | 用途 |
 |---|---:|---|
-| `--right-rail-width-desktop` | `80px` | `1280px` 桌面固定右轨 |
+| `--right-rail-width-desktop` | `clamp(80px, 4.166667vw, 106.666667px)` | 桌面固定右轨；`1920px` 视口约 `80px`，`2560px` 视口约 `106.7px` |
 | `--right-rail-width-tablet` | `64px` | `768px` 平板固定右轨 |
 | `--right-rail-width-mobile` | `56px` | `375px` 手机固定右轨 |
 | `--right-drawer-width-desktop` | `min(690px, calc(100vw - var(--right-rail-width-desktop)))` | 桌面抽屉约 `690px` 的实现近似值，包含 `1280px` 验收宽度 |
-| `--home-info-track` | `575fr` | 桌面内容壳的信息轨实现近似值 |
-| `--home-artwork-track` | `1211fr` | 桌面内容壳的高幅插画轨实现近似值 |
-| `--home-track-gap` | `clamp(24px, 2.05vw, 39px)` | 双轨响应式间隙实现近似值 |
-| `--home-brand-padding-block-start` | `162px` | 品牌顶部观测位置的桌面实现近似值；只能由信息区内边距产生 |
+| `--home-info-track` | `575fr` | HomeVisual 默认网格回退值；当前生产首页桌面不使用 |
+| `--home-artwork-track` | `1211fr` | HomeVisual 默认网格回退值；当前生产首页桌面不使用 |
+| `--home-track-gap` | `clamp(24px, 2.05vw, 39px)` | HomeVisual 默认网格回退值；当前生产首页桌面不使用 |
+| `--home-brand-padding-block-start` | `162px` | HomeVisual 默认信息区回退值；生产首页桌面由 `--home-desktop-info-*` 覆盖 |
 | `--home-artwork-intrinsic-width` | `1920` | 最终主视觉的固有宽度 |
 | `--home-artwork-intrinsic-height` | `2566` | 最终主视觉的固有高度 |
 | `--home-artwork-intrinsic-ratio` | `2566 / 1920` | 主视觉舞台由图片固有比例决定的高度 |
@@ -141,7 +141,7 @@
 
 - 桌面端内容宽度为视口减去 `--right-rail-width-desktop` 导航轨。
 - 首页是右轨常驻规则的唯一例外：`home-intro-settled` 为 `false` 时，右轨和抽屉均不挂载，因此不可见、不可聚焦，也不向辅助技术公告；内容壳仍预留对应断点的完整右轨 gutter，且该 gutter 位于全视口加载覆盖层下方，防止 settled 时产生 CLS。`home-intro-settled` 变为 `true` 后才挂载右轨和抽屉，并恢复本节其余全部滚动、定位与交互合同。
-- 导航轨 `position: fixed; inset-block: 0; inset-inline-end: 0; width: 80px`。
+- 导航轨 `position: fixed; inset-block: 0; inset-inline-end: 0; width: var(--right-rail-width-desktop)`；桌面宽度随视口按 `--right-rail-width-desktop` 的 clamp 规则变化。
 - 抽屉关闭时只有品牌竖标、三竖线菜单按钮和辅助操作。
 - 抽屉开启时，其右边缘严格等于固定导航轨左边缘，从该锚点向左展开；桌面目标宽度约 `690px`，在 `1280px` 视口也保持该目标，窄于可用空间时才收缩。内容区不重排，抽屉覆盖其上。
 - 抽屉之外提供透明点击外部目标以关闭，不显示页面变暗、纸色遮罩或其他可见 dimmer。关闭只可通过点击外部目标、按 Escape 或右轨原菜单按钮变形后的关闭符号完成。
@@ -151,33 +151,35 @@
 
 ### 4.2 首页首屏
 
-- `HomeVisual` 不再是全幅背景 Hero。桌面内容壳宽度为 CSS 布局视口减去 `--right-rail-width-desktop`，内部使用 `minmax(0, var(--home-info-track)) minmax(0, var(--home-artwork-track))` 双轨与 `--home-track-gap`；两轨比例约为 `575 / 1211`，固定右轨和浏览器滚动条均独立于该比例。
+- `HomeVisual` 不再是全幅背景 Hero。内容壳宽度仍扣除全局 `--right-rail-width-desktop`；首页桌面布局按 `home-page.css` 的 `--home-desktop-*` viewport 几何定位信息区与正常流主图，不复用旧的 `575fr / 1211fr` 不相交双轨。`2560×1440` 观测主图左缘约 `768px`、宽约 `1617.06px`；CSS 使用比例和 viewport 单位，不把该观测值写死到所有视口。固定右轨及浏览器滚动条仍独立于主图几何。
 - 右侧最终主视觉是正常文档流中的 `1920×2566` 图片，使用 `width: 100%; height: auto`。不得设置固定 `svh` 艺术高度、`100svh` 首屏高度、溢出裁切或 `object-fit: cover`。其 `2566 / 1920` 固有比例决定主视觉舞台高度，完整图像必须先出现。
 - 信息区由上至下：
   1. 由用户提供源图生成的透明 `Lonelyyang3` 主字标图片与独立双语副品牌图片；副品牌图片替代并移除可见文本 `个人创作与学习记录`。
   2. 八个内容分类，采用参考图的竖排分栏。
-  3. 预留媒体位；无媒体时显示克制的和纸占位，不展示假播放按钮。
-- Hero 信息区不包含“最新更新”行；最新文章仍完整保留在 4.3 `INFORMATION / 最近更新` 中。
+  3. Agent 导览真实 DOM 链接到 `#tools` 的 A 开放展台；intro settled 前设为 `inert`，settled 后可键盘操作。首屏默认不自动跳转；减弱动态直接进入同一可用内容。
+- Hero 信息区不包含“最新更新”行；最近文章保留在工具展台之后的 `INFORMATION / 最近更新` 中。
 - 固定加载层在水彩加载图上方按顺序居中叠放五张用户拥有的 `724×2172` 透明 RGBA PNG：`lonely`、`yang`、`3`、coral icon、vertical `LONELYYANG3` wordmark。每张图片内部已带预定位坐标，运行时资产从源文件逐字节复制，所有列表项共享同一画布；CSS 不得重新定位图片内容。加载层尺寸只使用 `--home-intro-loading-logo-block-size` 并按 `724 / 2172` 推导宽度，以保证 `2560×1440` 清晰可见且适配移动端。
-- 信息区使用 `--home-watercolor` 的连续水彩纸面，确保文字可读但不形成硬卡片。`Lonelyyang3` 的可见字形来自同一个 `2048×682` 透明图片字标，按断点分别受 `--home-brand-max-inline-desktop`、`--home-brand-max-inline-tablet`、`--home-brand-max-inline-mobile` 限制，并始终保持 `2048 / 682` 固有宽高比和 `height: auto`；不得拉伸、与主视觉重叠、被信息区裁切或造成水平溢出。其顶部约 `162px` 是观测位置，CSS 只能用信息区的 `padding-block-start: var(--home-brand-padding-block-start)` 近似实现，不得用 `transform`、绝对垂直居中或容器居中伪造位置。
+- 信息区和后续长页使用连续纸面，不形成硬卡片。`Lonelyyang3` 的可见字形来自同一个 `2048×682` 透明图片字标；桌面允许品牌栈按已批准构图轻微越过主图左缘，图片仍保持固有比例、不得裁切或拉伸，且所有断点不得产生水平溢出。桌面信息区位置和品牌外扩分别由 `--home-desktop-info-*`、`--home-desktop-brand-*` 响应式令牌控制；平板和手机回到单列，品牌与主图不相互覆盖。
 - 双语副品牌在主字标下方居中，间距只使用 `--home-brand-stack-gap`。其 CSS 裁切容器使用 `aspect-ratio: var(--home-brand-secondary-source-width) / var(--home-brand-secondary-crop-height)` 与 `overflow: hidden`；`1829×860` 透明运行时图片保持源图比例和完整像素几何，定位在容器块轴 `50%`，只使用静态 `translateY(-50%)` 居中。裁切窗口必须保留粉色带和图片内两行文字，不得另行生成栅格裁图或在断点间改变裁切焦点。
 - 最终主视觉承担唯一图像焦点，不叠放信息文案，也不按人物焦点裁切。用户提供的 `reference/asset-sources/kv2.png` 按字节复制到 `public/images/home/hero-main.png`，以 `1920×2566` 完整比例用于加载层和正常文档流主图。
 - 首页进入 settled 后，首屏右边缘显示固定导航轨。菜单触发器在轨道可用高度内垂直居中；社交链接组锚定轨底部，并与菜单触发器保持独立布局槽位。进入阶段不挂载右轨或抽屉，但必须在加载覆盖层下方保留相同宽度的右轨 gutter。
 
-### 4.2.1 主视觉至 INFORMATION 的纸层过渡
+### 4.2.1 主视觉至工具展台的纸层过渡
 
 - `HomePaperTransition` 只能在完整 `1920×2566` 主视觉的底缘形成浅斜向重叠、窄阴影边与短留白；不得提前遮住主体内容、用水平分隔线或把过渡画进插画位图。
-- 过渡层只与完整图像的底缘重叠，随后才是纸面和 INFORMATION。其深度分别使用 `--home-paper-depth-desktop`、`--home-paper-depth-tablet`、`--home-paper-depth-mobile`；上缘高差使用 `--home-paper-diagonal`。纸层颜色只能引用 `--paper`、`--paper-warm` 与 `--rule`。
+- 过渡层只与完整图像的底缘重叠，随后才是连续纸面和工具展台。其深度分别使用 `--home-paper-depth-desktop`、`--home-paper-depth-tablet`、`--home-paper-depth-mobile`；上缘高差使用 `--home-paper-diagonal`。纸层颜色只能引用 `--paper`、`--paper-warm` 与 `--rule`。
 - 阴影必须低对比且贴近浅斜边，只用于表达两张纸的轻微层差；不得恢复为深折页、宽遮罩或 `180px` 大留白。
-- 过渡层不承载正文、链接或滚动触发逻辑；其后才开始 `PaperSectionHeading` 和 INFORMATION 内容，确保语义顺序稳定。
+- 过渡层不承载正文、链接或滚动触发逻辑；其后依次开始工具展台、`PaperSectionHeading` 和 INFORMATION 内容，确保语义顺序稳定。
 
-### 4.3 首页文章流
+### 4.3 首页工具展台与文章流
 
-- 首屏下方为 `INFORMATION / 最近更新` 区域，采用和纸背景与淡色纹样。
+- 完整主视觉和纸层之后为单一论文阅读工具的开放展台，再进入 `INFORMATION / 最近更新`，之后是关于与页脚。整段使用连续浅色纸面，不插入白底断层、固定信息侧栏或无限加载。
+- 展台说明单篇 PDF 或受支持的 arXiv 链接输入、翻译／深读／两者模式、进入正式 `/agents/paper` 工作台，以及生成内容须核验、深读不替代原文或专业判断、PDF 导出受质量和逐页检查限制。首页只提供真实链接，不提交任务或调用模型。
+- 纸张与阅读稿图形仅是演示形态，必须清楚标注“非真实任务结果”；不增加虚假工具、预告占位或原型方案切换器。
 - 桌面双栏：左栏约 58%，展示最新文章时间线；右栏约 42%，展示精选或后续文章。
 - 先对文章按日期降序得到唯一数组；数组索引为偶数的文章进入左栏，奇数进入右栏。因此桌面按“左上 → 右上 → 左下 → 右下”读取时仍保持全局时间顺序，且两栏不重复。
 - 每条文章以日期、分类、标题组成，条目之间使用墨色点线；不使用大圆角卡片。
-- 页面继续向下可接关于摘要、项目精选和页脚，但维持相同开放式排版。
+- 首页文章链接使用真实 Content `path`；继续向下进入开放式关于摘要与站点页脚。
 
 ### 4.4 分类列表页
 
@@ -190,7 +192,7 @@
 
 - 对外文章 URL 为 `/blog/:slug`；当前由 `app/pages/blog/[...slug].vue` 统一处理 canonical Content path 和 locale 前缀。
 - 顶部展示分类、日期、标题和封面；封面只能使用用户拥有或获授权的临时图片，缺图则显示纹样背景。
-- 正文宽度 680–760px，居中偏左，保留右侧导航轨和充足留白。
+- 阶段一真实文章采用已确认的宽景 D 组合：在 `2560×1440` 桌面视口，正文宽 `1344px`、字号约 `21.333px / 1.8`；正文栏以整个视口为基准独立居中（中轴 `1280px`），不扣除右侧导航轨，也不与左侧辅助栏作为整体居中。窄视口下正文按可用宽度收缩。
 - 代码块、引用、图片和标题均使用同一和纸/墨色体系。
 - 详情页底部提供上一篇、下一篇和返回分类。
 
@@ -205,9 +207,10 @@
 - 原型始终渲染 `PrototypeReaderGuided`（`ReaderGuided.vue`），共用同一篇 `research` 集合页面项，正文一律经 `ArticleProse`（Nuxt Content `ContentRenderer`）渲染；原型不编写 Markdown 解析器、不复制正文副本。原型样式 `scoped`，只叠加既有令牌（`--paper`、`--ink`、`--ink-soft`、`--rule`、`--vermilion`、`--font-mincho`、`--paper-surface-depth`），保持开放式长文、无卡片叠卡片。
 - 可复用渲染契约：未来 `content/blog` 下的普通 Markdown 博文与外部 Nuxt Content 页面项（如 `research` 这种非 `content/` 目录源）共用 `ArticleProse` 作为唯一正文渲染器，不建立第二套正文渲染路径；选定的导读轨、档案头图与版式规则可作为未来生产阅读页的复用基础。
 
-### 4.5.2 `paper-review` 深读报告与全文译文阅读器（桌面 · 中文）
+### 4.5.2 阶段二本地论文工作台与 `paper-review` 阅读器（桌面 · 中文）
 
-- `/prototype/paper-review` 路由由父路由 `paper-review.vue` + 子路由构成：`paper-review/index.vue` 工作台、`paper-review/report.vue` 深读报告、`paper-review/translation.vue` 全文译文。父路由持有瞬态审阅会话（PDF 对象 URL + 任务结果）并经 provide/inject 向子路由提供，子路由导航间不丢失；不写入浏览器历史、localStorage、Cookie 或模块单例。API 密钥等凭据只存在于工作台子路由的页面内存，提交后立即清除；在途请求由工作台子路由自持 AbortController，卸载与 pagehide 时中止并防止迟到采纳。对象 URL 在重置、替换提交、父路由卸载与 pagehide 时吊销一次。直接访问或刷新 `/report`、`/translation`（无会话）时，给出可理解的“尚无结果 + 返回工作台”链接。
+- 阶段二正式入口为 `/agents/paper` 与 `/agents/paper/settings`，只供本地开发使用，不构成公开或生产服务。相关 `/api/prototype/...` 任务端点保留开发构建、loopback 来源及匹配 Origin 校验；`prototype` 前缀不表示可向公网开放，也不得为部署方便移除这些边界。
+- `/prototype/paper-review` 路由仍是独立原型，由父路由 `paper-review.vue` + 子路由构成：`paper-review/index.vue` 工作台、`paper-review/report.vue` 深读报告、`paper-review/translation.vue` 全文译文。父路由持有瞬态审阅会话（PDF 对象 URL + 任务结果）并经 provide/inject 向子路由提供，子路由导航间不丢失；不写入浏览器历史、localStorage、Cookie 或模块单例。API 密钥等凭据只存在于工作台子路由的页面内存，提交后立即清除；在途请求由工作台子路由自持 AbortController，卸载与 pagehide 时中止并防止迟到采纳。对象 URL 在重置、替换提交、父路由卸载与 pagehide 时吊销一次。直接访问或刷新 `/report`、`/translation`（无会话）时，给出可理解的“尚无结果 + 返回工作台”链接。
 - 阅读正文是**连续 Markdown 长文**：复用 B 变体几何（≥1600px 左侧粘性章节轨 + 独立居中的 760px 正文栏；<1600px 章节轨退化为横向章节条），正文排版沿用和纸墨色衬线体系（`Noto Serif SC → Noto Serif JP → 宋体/系统衬线`，正文 17px/1.8，标题 700 明朝体）。**主阅读不使用逐单元卡片、印章或预览 iframe**；英文原文、逐单元核验状态、未覆盖范围均以 `<details>` 二级披露呈现，不进入主阅读流。
 - 报告正文由应用侧纯投影生成（`report.sections` + 引文出处），译文正文由 `source.units` + `translation.pairs` 按源文档顺序投影为连续中文；公式、表格内部内容、页码保留原文并附 `pdf://N` 链接（渲染时解析为会话 PDF 对象 URL 的 `#page=N`）。译文缺失的段落/标题/图注在原文位置给出本地化缺失说明，不静默跳过；参考文献/附录标记为排除范围。未覆盖范围按原因聚合展示，保留全部受影响 scope 与单元，绝不把范围缩写为一句摘要；核验状态标注“逐字比对 ≠ 语义正确/结论成立”。
 - 安全渲染契约：报告与译文 Markdown 经**标准 CommonMark 解析栈（remark-parse + remark-rehype，原始 HTML 禁用）解析后做 AST 白名单渲染**——MDC 组件语法（`::name`/`:a[prop]`）与原始 HTML 一律保持为惰性字面文本、不执行、不渲染为元件或图片，`pdf://N` 仅重写为会话持有的 PDF 对象 URL；链接经 WHATWG URL 解析校验，仅允许 http/https/mailto/相对路径/`#`，控制字符与空格直接拒绝，其余属性一律剥离；标题由渲染器按顺序生成确定性 id，与章节轨 TOC 同源，杜绝锚点漂移。模型文本在投影层先转义再嵌入，双层防御。报告/译文均可下载为 `.md` 文件（译文 `.md` 附英文原文附录与核验状态）。
@@ -235,7 +238,7 @@
 - 属性：`open`。
 - 事件：`toggle`、`close`。
 - 菜单按钮必须支持键盘，并公开 `aria-expanded` 和 `aria-controls`；焦点陷阱、Escape、外部点击关闭和焦点恢复由 `RightNavDrawer` 负责，但它不得锁定或切换页面滚动。
-- 菜单触发器位于右轨垂直中心；轨底社交链接容器使用 `data-testid="right-nav-share-links"`。抽屉开闭期间固定轨的位置、宽度和布局均不变，面板右边缘始终对齐轨左边缘；该调整不得改变 80/64/56px 轨宽、抽屉覆盖方式或 `RightNavDrawer` 的职责边界。
+- 菜单触发器位于右轨垂直中心；轨底社交链接容器使用 `data-testid="right-nav-share-links"`。抽屉开闭期间固定轨的位置、宽度和布局均不变，面板右边缘始终对齐轨左边缘；不得改变桌面 clamp、平板 `64px`、手机 `56px` 轨宽规则、抽屉覆盖方式或 `RightNavDrawer` 的职责边界。
 
 ### `RightNavDrawer`
 
@@ -250,18 +253,19 @@
 ### `HomeVisual`
 
 - 外层根节点保留现有 `data-testid="home-visual"`，负责每次进入首页的阶段与滚动提示，并承载 `data-intro-mode="first|reduced"` 和 `data-intro-state="brand|artwork|handoff|settled"`。
-- 内层信息/插画布局网格使用 `data-testid="home-visual-stage"`，负责双轨或响应式单列排布。最终主视觉位于该节点的正常流内，图片保持 `width: 100%; height: auto`。
+- 内层信息/插画布局容器使用 `data-testid="home-visual-stage"`：桌面按已批准的 viewport 几何定位叠放信息与图片，平板／手机单列排布。最终主视觉位于该节点的正常流内，图片保持 `width: 100%; height: auto`。
 - 信息节点使用 `data-testid="home-visual-info"`；最终主视觉容器使用 `data-testid="home-artwork-panel"`。独立固定加载图使用 `data-testid="home-artwork-loading"`，只服务进入动画，不能替代或裁切正常流最终主视觉。背景、插画与文本必须分层，不能把标注稿直接作为整页截图使用。
 - 品牌必须保持单一语义标题 `<h1 id="home-brand" aria-label="Lonelyyang3">`，且其中只保留一张最终横向图片 `public/images/brand/lonelyyang3-wordmark.png`。加载装饰层是固定覆盖层内的单一 `<ul aria-hidden="true">`，从只读路径数组严格按顺序渲染 `/images/brand/home-intro/logo01-lonely-clean.png`、`/images/brand/home-intro/logo02-yang-clean.png`、`/images/brand/home-intro/logo03-3.png`、`/images/brand/home-intro/logo04-icon.png`、`/images/brand/home-intro/logo05-wordmark.png`，语义层依次为 `lonely`、`yang`、`3`、coral icon、vertical `LONELYYANG3` wordmark。五张图片均为用户拥有、带 alpha 的预定位透明 RGBA `724×2172` 画布，由生成器从对应源文件逐字节复制到运行时路径；每个 `<li>` 绝对定位到同一画布，不使用切片、`clip-path`、逐件类名或 JavaScript 逐件计时器。
+- 可选 `media` slot 在正式首页承载 `HomeAgentGuide`，滚动提示通过 `scrollTarget="#tools"` 进入 A 开放展台。导览内容保持真实 DOM；只在共享 `home-intro-settled` 为 `true` 时解除 `inert`，不在默认首页加载时自动跳转。其他页面可保留该槽的既有回退内容。
 - 正常动态模式先保留 `500ms` 首次绘制等待，再由定时状态设置 `data-intro-started="true"`。五层分别从 `opacity: 0`、`blur(10px)`、`translateY(-12px)` 经 `900ms ease` 清晰并向下沉降至 `translateY(0)`；相对延迟为 `0 / 600 / 1200 / 1800 / 2400ms`，因此绝对开始时间为 `500 / 1100 / 1700 / 2300 / 2900ms`，完成时间为 `1400 / 2000 / 2600 / 3200 / 3800ms`。完整五层 Logo 保持清晰可读 `600ms`，随后 `data-intro-drop="true"` 在 `4400ms` 统一触发整个列表以 `2000ms ease` 过渡到 `opacity: 0`、`blur(20px)`；该退出只改变列表的透明度与滤镜，并与固定加载图从同一时刻开始的下落及持续清晰化自然重叠。尺寸、预定位画布内容和布局几何均不参与动画。
 - 双语副品牌仍是独立的 `<img src="/images/brand/lonelyyang3-myself-world.png" alt="MySelf-World，我与我的世界">`，位于主标题下方的既有 CSS 裁切窗口内。它与最终横向字标在加载 Logo 组装期间保持不可见，只在 `data-intro-brand-visible="true"`、`handoff` 或 `settled` 显示；不再有 `1500ms` 的独立延迟揭示，也不在 `artwork` 阶段提前出现。
 - 两张最终运行时品牌图片由 `scripts/generate-brand-assets.mjs` 从用户提供的透明 RGBA PNG 逐字节复制。生成器只验证格式、Alpha 通道、固有尺寸以及透明/可见像素，不去底、不重编码，因此保留原始颜色、透明边缘和抗锯齿笔刷细节。运行时使用默认 `mix-blend-mode: normal`：浅色主题以 `invert(0) hue-rotate(0deg)` 保持原色，深色主题以 `invert(1) hue-rotate(180deg)` 只处理 RGB 并保留 alpha。使用 `node scripts/generate-brand-assets.mjs` 复制，使用 `node scripts/generate-brand-assets.mjs --check` 验证。主题切换与生成过程均不得改变主图 `2048 / 682` 比例、副图 `1829 / 860` 比例、裁切窗口或布局尺寸。
-- 每次刷新和每次路由重新进入首页都必须复用品牌、信息、固定加载图、加载 Logo 列表、最终主视觉与 INFORMATION 的同一 DOM，并执行相同的 `500ms / 3800ms / 4400ms / 5900ms / 7900ms` 时序；只能通过外层根节点已有的 `data-intro-mode`、`data-intro-state`、`data-intro-started`、`data-intro-brand-visible`、`data-intro-drop` 和时长令牌切换这些节点的视觉状态。正常动态模式的 `data-intro-started` 必须通过既有可清理定时器在 `500ms` 激活；减弱动态模式复用相同内容 DOM，但隐藏加载 Logo 并立即进入 settled。
+- 每次刷新和每次路由重新进入首页都必须复用品牌、信息、固定加载图、加载 Logo 列表、最终主视觉与 Agent 导览的同一 DOM，并执行相同的 `500ms / 3800ms / 4400ms / 5900ms / 7900ms` 时序；只能通过外层根节点已有的 `data-intro-mode`、`data-intro-state`、`data-intro-started`、`data-intro-brand-visible`、`data-intro-drop` 和时长令牌切换这些节点的视觉状态。正常动态模式的 `data-intro-started` 必须通过既有可清理定时器在 `500ms` 激活；减弱动态模式复用相同内容 DOM，但隐藏加载 Logo 并立即进入 settled，导览同时可用。
 - 布局层使用 SSR-safe 共享状态 `useState<boolean>('home-intro-settled', () => false)`：首页正常进入期间始终为 `false`，只在 `7900ms` settled 时变为 `true`；`prefers-reduced-motion: reduce` 下立即为 `true`。右轨和抽屉由布局层依据该状态条件挂载，不扩展 `HomeVisual` 或导航组件属性。
 
 ### `HomePaperTransition`
 
-- 根节点使用 `data-testid="home-paper-transition"`，位于 `HomeVisual` 之后、`PaperSectionHeading` 之前。
+- 根节点使用 `data-testid="home-paper-transition"`，位于 `HomeVisual` 之后、工具展台之前。
 - 只负责斜向纸层和留白，不接收内容数据，不抢占焦点，使用 `aria-hidden="true"`；静态几何在所有进入阶段保持一致，防止布局位移。
 
 ### `VerticalCategoryNav`
@@ -319,21 +323,21 @@
 
 ### 桌面（≥ 1024px）
 
-- `1280px` 验收基准：内容壳始终预留 80px 右轨 gutter；剩余内容壳采用约 `575fr / 1211fr` 左侧水彩信息面/完整长幅主视觉双轨，并以 `--home-track-gap` 保持 `24–39px` 响应式间隙。主视觉以 `1920×2566` 的 `width: 100%; height: auto` 正常流显示，舞台高度由固有比例确定，不以 `100svh`、最小高度或裁切限制。双图品牌栈顶部位置由约 `162px` 的信息区内边距实现；主字标最大宽度使用 `--home-brand-max-inline-desktop`，副品牌宽度使用 `--home-brand-secondary-inline-desktop`，二者居中堆叠且不得触碰或覆盖主视觉、被信息轨裁切或引发页面水平溢出。settled 后挂载 80px 固定导航轨，菜单垂直居中、社交链接在轨底，约 `690px` 抽屉右边缘紧贴轨左边缘。
-- `INFORMATION` 前使用约 `66px` 深的浅斜向重叠与窄阴影，`58–74px` 为桌面可接受验收带；首屏与内容流之间不得出现水平硬切或深折页。
+- 桌面始终为全局宽右轨预留 gutter。首页主图保持 `1920×2566` 固有比例并在正常文档流中 `width: 100%; height: auto`；不得以 `100svh`、最小高度或裁切限制。已记录的 `2560×1440` 观测是主图左缘约 `768px`、宽约 `1617.06px`，由 `--home-desktop-artwork-*` viewport 令牌实现，不能固定到其他视口。信息区品牌允许按 `--home-desktop-brand-*` 令牌越过主图左缘；页面不能水平溢出。
+- 全页顺序为 Hero → 浅斜叠纸 → A 开放工具展台 → 最近文章 → 关于／页脚。过渡层在完整主图底缘形成约 `66px` 深度的浅斜重叠与窄阴影，`58–74px` 为桌面验收带；不做水平硬切或深折页。
 
 ### 平板（768–1023px）
 
-- `768px` 验收基准：内容壳始终预留 `--right-rail-width-tablet` gutter；settled 后挂载相同宽度的导航轨，抽屉在可用宽度内收缩且右边缘紧贴轨左边缘。内容壳改为单列，完整主视觉以固有比例正常流显示，信息区不覆盖图片。纸层只在完整图片底缘形成约 `52px` 的浅斜重叠与阴影。
+- `768px` 验收基准：内容壳始终预留 `--right-rail-width-tablet` gutter；settled 后挂载相同宽度的导航轨，抽屉在可用宽度内收缩且右边缘紧贴轨左边缘。首页内容改为单列，完整主视觉以固有比例正常流显示，信息区不覆盖图片。纸层只在完整图片底缘形成约 `52px` 的浅斜重叠与阴影。
 - 双图品牌栈在信息区可用宽度内居中堆叠；主字标最大宽度使用 `--home-brand-max-inline-tablet`，副品牌宽度使用 `--home-brand-secondary-inline-tablet`。两张图片及副品牌裁切窗口必须完整可辨，不得与后续主视觉重叠、被裁切出合同范围或产生水平溢出。
 - 菜单仍在轨内垂直居中，社交链接仍在轨底；不得为平板复制第二套右轨或抽屉控件。
 
 ### 手机（< 768px）
 
 - 内容壳始终预留右侧 `--right-rail-width-mobile` gutter；settled 后才挂载固定窄轨，轨内显示菜单触发器、简化品牌标记和轨底社交链接。搜索、语言与主题控件只在抽屉底部出现。抽屉开启后仍保持固定窄轨不动，面板右边缘对齐窄轨左边缘，轨内菜单切换为唯一可见关闭按钮。
-- `375px` 验收基准：内容壳宽度为 `100vw - var(--right-rail-width-mobile)`，主视觉单列排列并以 `width: 100%; height: auto` 完整进入正常文档流，信息区不以覆盖层压在图片上。纸层仅在完整图片底缘形成约 `40px` 的浅斜重叠与阴影。
+- `375px` 验收基准：内容壳宽度为 `100vw - var(--right-rail-width-mobile)`，Hero 与后续首页内容单列排列；主视觉以 `width: 100%; height: auto` 完整进入正常文档流，信息区不以覆盖层压在图片上。纸层仅在完整图片底缘形成约 `40px` 的浅斜重叠与阴影。
 - 双图品牌栈在扣除右轨 gutter 后的可用宽度内居中堆叠；主字标最大宽度使用 `--home-brand-max-inline-mobile`，副品牌宽度使用 `--home-brand-secondary-inline-mobile`。两张图片及副品牌裁切窗口必须完整可辨，不得与主视觉重叠、被裁切出合同范围或造成任何水平滚动。
-- 首屏继续使用同一张临时主图，不生成第二份资产，也不设置断点焦点裁切。390×844 与 375×667 均须允许用户自然滚动浏览完整图片；左侧文案不得覆盖图片内容。
+- 首屏继续使用同一张主图，不生成第二份资产，也不设置断点焦点裁切。390×844 与 375×667 均须允许用户自然滚动浏览完整图片；导览链接只在 intro settled 后可用，默认不自动跳转。
 - 分类从八列竖排改为可横向浏览的竖排组，触摸目标不小于 44px。
 - 文章双栏合并为单栏，不允许横向滚动。
 
@@ -355,7 +359,8 @@
 ## 9. 素材策略与已接受设计债务
 
 - 网页加载 `public/images/` 中的本地运行时文件，URL 使用 `/images/...`；页面不直接加载 `reference/asset-sources/` 中的来源输入。素材来源文档只描述各自明确列出的范围，不据此推断运行时文件的字节来源。
-- 新增开发期临时素材必须由用户提供、归用户所有或明确获授权；不得下载、复制或热链参考站资产。已列于 `public/images/reference/deaimon/ASSET-SOURCES.md` 的文件是现有本地开发预览占位素材，并非已获生产使用许可的素材；生产前必须替换或重建为获准使用的素材。固定加载图与最终正常流图必须是分离层，不得以加载层裁切替代完整最终图像。
+- 新增开发期临时素材原则上须由用户提供、归用户所有或明确获授权，不得下载或热链参考站资产。已列于 `public/images/reference/deaimon/ASSET-SOURCES.md` 的文件也是本地开发预览占位素材，并非已获生产使用许可；生产前必须替换或重建为获准使用的素材。固定加载图与最终正常流图必须是分离层，不得以加载层裁切替代完整最终图像。
+- #66 生产首页使用已认可原型中的 `public/images/prototype/home-paper.png`（用户提供的背景素材）和用户生成的 `public/images/prototype/home-wash.png`；早先用于本机评审的 ref1 截图衍生 `reference-wash-preview.png` 已从运行时树移除，发布分支不包含该文件，也不包含其参考站图片字节。
 - 用户提供的 `reference/asset-sources/kv2.png` 是首页主图来源；展示合同是 `width: 100%; height: auto`，保持 `1920×2566` 完整比例。来源文件与运行时文件关系以 `ASSET-SOURCES.md` 记录为准。
 - 上线前：替换除 `ASSET-SOURCES.md` 已确认权利来源的本站品牌素材之外的所有临时素材，同时保留完整比例、正常流接口、纸层交接和组件接口，不保留任何人物焦点裁切规则。
 - 暗色主题不是参考稿的一部分，其视觉精度低于浅色主题，但功能必须保留。

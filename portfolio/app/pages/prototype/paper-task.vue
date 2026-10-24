@@ -226,7 +226,7 @@
 </template>
 
 <script setup lang="ts">
-import PaperTaskReader from '~/components/prototype/PaperTaskReader.vue'
+import PaperTaskReader from '~/components/agents/PaperTaskReader.vue'
 import PaperTaskSourceMaterials from '~/components/prototype/PaperTaskSourceMaterials.vue'
 import PaperTaskTranslationPreview from '~/components/prototype/PaperTaskTranslationPreview.vue'
 import { usePaperTaskReader } from '~/composables/paper-task-reader'

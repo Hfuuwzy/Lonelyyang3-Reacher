@@ -712,3 +712,136 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+.paper-task__delete-dialog {
+  --paper-task-accent: color-mix(in srgb, var(--vermilion) 72%, var(--ink));
+
+  box-sizing: border-box;
+  inline-size: min(34rem, calc(100vw - 2rem));
+  max-inline-size: min(34rem, calc(100vw - 2rem));
+  max-block-size: calc(100vh - 2rem);
+  max-block-size: calc(100dvh - 2rem);
+  margin: auto;
+  padding: 0;
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--ink) 20%, transparent);
+  border-radius: 18px;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--paper-warm) 97%, var(--paper)), var(--paper-warm));
+  color: var(--ink);
+  box-shadow:
+    0 24px 72px color-mix(in srgb, var(--ink) 30%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--paper-warm) 85%, var(--paper));
+}
+
+.paper-task__delete-dialog::backdrop {
+  background: color-mix(in srgb, var(--ink) 58%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.paper-task__delete-content {
+  position: relative;
+  padding: clamp(1.35rem, 4vw, 2rem);
+}
+
+.paper-task__delete-content::before {
+  position: absolute;
+  inset: 0 0 auto;
+  block-size: 3px;
+  background: linear-gradient(90deg, var(--vermilion), color-mix(in srgb, var(--vermilion) 18%, transparent) 76%, transparent);
+  content: '';
+}
+
+.paper-task__delete-kicker {
+  margin: 0 0 0.5rem;
+  color: var(--paper-task-accent);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+}
+
+.paper-task__delete-content h2 {
+  margin: 0;
+  font-family: var(--font-mincho);
+  font-size: clamp(1.45rem, 4vw, 1.8rem);
+  line-height: 1.35;
+  text-wrap: balance;
+}
+
+.paper-task__delete-subject {
+  display: grid;
+  gap: 0.2rem;
+  margin: 1rem 0 0;
+  padding-inline-start: 0.8rem;
+  border-inline-start: 3px solid var(--vermilion);
+  font-family: var(--font-mincho);
+  line-height: 1.55;
+}
+
+.paper-task__delete-subject span {
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+}
+
+.paper-task__delete-subject strong {
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
+.paper-task__delete-copy {
+  margin-block-start: 1rem;
+  color: var(--ink-soft);
+  font-family: var(--font-mincho);
+  font-size: 0.96rem;
+  line-height: 1.7;
+  text-wrap: pretty;
+}
+
+.paper-task__delete-copy p {
+  margin: 0;
+}
+
+.paper-task__delete-copy p + p {
+  margin-block-start: 0.55rem;
+}
+
+.paper-task__delete-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  margin-block-start: 1.35rem;
+  padding-block-start: 1rem;
+  border-block-start: 1px solid color-mix(in srgb, var(--ink) 14%, transparent);
+}
+
+.paper-task__delete-dialog .paper-task__delete-cancel {
+  min-inline-size: 6.5rem;
+  background: color-mix(in srgb, var(--paper) 50%, var(--paper-warm));
+}
+
+.paper-task__delete-dialog .paper-task__delete-confirm {
+  min-inline-size: 7.5rem;
+  border-color: var(--paper-task-accent);
+  background: var(--paper-task-accent);
+  color: var(--paper-warm);
+  font-weight: 750;
+  box-shadow: 0 5px 14px color-mix(in srgb, var(--vermilion) 24%, transparent);
+}
+
+.paper-task__delete-dialog .paper-task__delete-confirm:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--paper-task-accent) 84%, var(--ink));
+  background: color-mix(in srgb, var(--paper-task-accent) 88%, var(--ink));
+  color: var(--paper-warm);
+}
+
+.paper-task__delete-dialog :focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--vermilion) 54%, var(--ink));
+  outline-offset: 3px;
+}
+
+@media (max-width: 380px) {
+  .paper-task__delete-dialog .paper-task__button {
+    flex: 1 1 7.5rem;
+  }
+}

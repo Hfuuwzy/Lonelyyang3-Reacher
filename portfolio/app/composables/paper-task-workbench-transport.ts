@@ -1,6 +1,6 @@
 import { $fetch } from 'ofetch'
 import type { FetchResponse } from 'ofetch'
-import type { PaperTaskEvent, PaperTaskSelection } from '../utils/paper-task-contract'
+import type { PaperTaskEvent, PaperTaskHistoryEntry, PaperTaskSelection } from '../utils/paper-task-contract'
 import { consumePaperTaskStream } from '../utils/paper-task-stream'
 import type { PaperTaskStreamOutcome } from '../utils/paper-task-stream'
 
@@ -21,8 +21,17 @@ export type PaperTaskSubmitResult =
 
 export interface PaperTaskWorkbenchTransport {
   readonly submit: (request: PaperTaskSubmitRequest) => Promise<PaperTaskSubmitResult>
+  readonly history: () => Promise<unknown>
+  readonly observe: (request: PaperTaskObserveRequest) => Promise<PaperTaskSubmitResult>
   readonly cancel: (taskId: string) => Promise<unknown>
   readonly delete: (taskId: string) => Promise<unknown>
+}
+
+export interface PaperTaskObserveRequest {
+  readonly taskId: string
+  readonly selection: PaperTaskSelection
+  readonly signal: AbortSignal
+  readonly onEvent: (event: PaperTaskEvent) => void
 }
 
 async function* decodeChunks(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
@@ -54,15 +63,27 @@ export function createPaperTaskWorkbenchTransport(): PaperTaskWorkbenchTransport
         signal: request.signal,
       })
 
-      if (!response.ok || response.body === null) {
-        return { kind: 'http-error', status: response.status }
-      }
-
-      const outcome = await consumePaperTaskStream(decodeChunks(response.body), {
-        selection: request.selection,
-        onEvent: request.onEvent,
+      return consumeResponse(response, request)
+    },
+    async history(): Promise<unknown> {
+      return await $fetch<readonly PaperTaskHistoryEntry[]>('/api/prototype/paper-task', {
+        credentials: 'omit',
+        retry: 0,
       })
-      return { kind: 'stream', outcome }
+    },
+    async observe(request) {
+      const response: FetchResponse<ReadableStream<Uint8Array>> = await $fetch.raw(
+        `/api/prototype/paper-task/${encodeURIComponent(request.taskId)}/events`,
+        {
+          method: 'GET',
+          responseType: 'stream',
+          credentials: 'omit',
+          retry: 0,
+          ignoreResponseError: true,
+          signal: request.signal,
+        },
+      )
+      return consumeResponse(response, request)
     },
     async cancel(taskId) {
       return await $fetch<unknown>(`/api/prototype/paper-task/${taskId}/cancel`, {
@@ -81,4 +102,18 @@ export function createPaperTaskWorkbenchTransport(): PaperTaskWorkbenchTransport
       })
     },
   }
+}
+
+async function consumeResponse(
+  response: FetchResponse<ReadableStream<Uint8Array>>,
+  request: Pick<PaperTaskSubmitRequest, 'selection' | 'signal' | 'onEvent'>,
+): Promise<PaperTaskSubmitResult> {
+  if (!response.ok || response.body === null) {
+    return { kind: 'http-error', status: response.status }
+  }
+  const outcome = await consumePaperTaskStream(decodeChunks(response.body), {
+    selection: request.selection,
+    onEvent: request.onEvent,
+  })
+  return { kind: 'stream', outcome }
 }

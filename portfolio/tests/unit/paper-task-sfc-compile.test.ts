@@ -9,9 +9,12 @@ const SFC_PATHS = [
   'app/pages/prototype/paper-task.vue',
   'app/pages/prototype/paper-task-reader-fixture.vue',
   'app/pages/prototype/api-settings.vue',
+  'app/pages/agents/paper/index.vue',
+  'app/pages/agents/paper/settings.vue',
+  'app/components/agents/PaperTaskWorkbench.vue',
   'app/components/prototype/PaperTaskApiSettings.vue',
   'app/components/prototype/PaperTaskTranslationPreview.vue',
-  'app/components/prototype/PaperTaskReader.vue',
+  'app/components/agents/PaperTaskReader.vue',
   'app/components/prototype/PaperTaskExportActions.vue',
 ] as const
 

@@ -10,6 +10,14 @@ This document covers the user-provided source files under `reference/asset-sourc
 
 The hero source is user-provided/generated and copied without resizing or re-encoding. The source and runtime file must remain byte-identical.
 
+## Homepage watercolor wash
+
+| Source | Source properties | Runtime derivative | Use |
+|---|---|---|---|
+| `reference/asset-sources/home-wash-ai.png` | `2000×1002`; user-provided AI-generated watercolor | `public/images/prototype/home-wash.png`; byte-for-byte copy at unchanged `2000×1002` | Homepage continuous paper wash |
+
+The watercolor source was generated for this site at the user's request. The runtime file is a byte-for-byte copy; no reference-site image or ref1 screenshot is used.
+
 ## Homepage brand assets
 
 | Source | Source properties | Runtime derivative | Use |

@@ -11,7 +11,7 @@ import { manuscriptParagraphs, repairDocumentArtifact, submitDocumentReview } fr
 
 const cliEntry = process.argv[1]
 if (cliEntry === undefined) throw new Error('paper task tools require the DSH CLI module context')
-const cliRequire = createRequire(resolve(cliEntry))
+const cliRequire = createRequire(realpathSync(resolve(cliEntry)))
 const { defineTool } = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-tools')).href)
 const PAGE_PARAMETERS = {
   offset: { type: 'integer', description: 'UTF-8 byte offset, initially 0. Follow nextOffset when it is below totalBytes.' },

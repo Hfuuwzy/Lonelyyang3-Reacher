@@ -1,12 +1,15 @@
 /**
- * In-memory coordinator for sample-only local paper tasks (issue #40).
+ * Project-local coordinator for paper tasks (issue #40, #61, #62).
  *
  * `submit` persists the original PDF into the retained project-local workspace
- * and returns a wire-event stream that runs the selected branches
- * independently. `cancel` and `remove` stop every owned runtime and await
- * cleanup before reporting an action result; a failed cleanup blocks deletion.
- * Handles live only in memory for the lifetime of the task — no history, list,
- * replay, or recovery.
+ * and starts a service-owned producer for the selected branches independently.
+ * A bounded task index and source state are retained with the task workspace;
+ * reconnecting after restart replays a settled snapshot but never starts another
+ * run. `cancel` and `remove` stop every owned runtime and await cleanup before
+ * reporting an action result. Removal persists an explicit tombstone until
+ * owned workspaces are gone, so failed cleanup remains visible and can be
+ * retried after restart. Running tasks recover as interrupted; no runtime or
+ * provider settings are resumed.
  */
 
 import { randomUUID } from 'node:crypto'
@@ -16,7 +19,8 @@ import {
   type PaperTaskActionResult,
   type PaperTaskBranch,
   type PaperTaskEvent,
-  type PaperTaskState,
+  type PaperTaskHistoryEntry,
+  type PaperTaskQuality,
 } from '../../app/utils/paper-task-contract'
 import type { PaperTaskPdfInput } from './multipart'
 import type { PreparedPaperTaskSource } from './source-acquisition'
@@ -33,15 +37,13 @@ import { getPaperTaskProviderSettings } from './provider-settings'
 import { getSelectedBranches } from '../../app/utils/paper-task-contract'
 import { snapshotGenerationResources } from './generation-resources'
 import { writeTaskInput } from './input'
-import { finalizeHandle, makeHandle, requestStop, type PaperTaskHandle } from './handle'
-import {
-  createTaskEvents,
-} from './stream'
+import { closeRuntime, makeHandle, requestStop, type PaperTaskHandle } from './handle'
+import { createRecoveredTaskEvents, createTaskEvents } from './stream'
 import { createPaperTaskSourceStore, type StoredSource } from './source-store'
 import { correctPaperTaskSource, type PaperTaskCorrection, type PaperTaskCorrectionResult } from './source-correction'
 import { readPaperTaskTranslation } from './translation-access'
 import type { PaperTaskTranslationView } from '../../app/utils/paper-task-translation-contract'
-import { readPaperTaskReader } from './reader-access'
+import { readPaperTaskReader, type PaperTaskReaderPreviewMetadata } from './reader-access'
 import { readPaperTaskOriginalPdf, readPaperTaskTranslatedPdf } from './pdf-access'
 import type { PaperTaskReaderView } from '../../app/utils/paper-task-reader-contract'
 import {
@@ -53,6 +55,15 @@ import {
   type PaperTaskFormatInspection,
 } from './artifact-export'
 import { paperTaskBranchQuality, paperTaskDocumentQuality, type PaperTaskBranchQualityState } from './format-gate'
+import {
+  outcomeForHistoryStatus,
+  previewSnapshot,
+  readPaperTaskIndex,
+  restoredTaskSnapshot,
+  writePaperTaskIndex,
+  type PaperTaskPreviewSnapshot,
+  type StoredPaperTaskSnapshot,
+} from './task-index'
 
 const SAFE_CREATE_MESSAGE = '任务工作区创建失败，请稍后重试。'
 const SAFE_SELECTION_MESSAGE = '任务分支选择不受支持，请选择翻译、深读或两者。'
@@ -63,6 +74,8 @@ export interface PaperTaskServiceDependencies {
   readonly prepareSource?: (bytes: Uint8Array, signal?: AbortSignal) => Promise<PaperTaskSourceResult>
   readonly createId?: () => string
   readonly projectRoot?: string
+  /** Narrow filesystem seam for proving owned-workspace deletion and retry behavior. */
+  readonly removeWorkspace?: (workspaceRoot: string) => void
 }
 
 export type PaperTaskSubmitResult =
@@ -72,10 +85,12 @@ export type PaperTaskSubmitResult =
 export interface PaperTaskService {
   submit(
     input: PaperTaskPdfInput,
-    options?: { readonly signal?: AbortSignal; readonly preparedSource?: PreparedPaperTaskSource },
+    options?: { readonly preparedSource?: PreparedPaperTaskSource; readonly sourceTitle?: string },
   ): Promise<PaperTaskSubmitResult>
   cancel(taskId: string): Promise<PaperTaskActionResult>
   remove(taskId: string): Promise<PaperTaskActionResult>
+  history(): readonly PaperTaskHistoryEntry[]
+  events(taskId: string): AsyncIterable<PaperTaskEvent> | undefined
   source(taskId: string): StoredSource | undefined
   translation(taskId: string): PaperTaskTranslationView | undefined
   reader(taskId: string): PaperTaskReaderView | undefined
@@ -95,9 +110,62 @@ export function createPaperTaskService(
   const prepareSource = dependencies.prepareSource ?? defaultPrepareSource
   const createId = dependencies.createId ?? (() => randomUUID())
   const projectRoot = dependencies.projectRoot ?? resolve(process.cwd(), '.data', 'paper-tasks')
+  const removeWorkspace = dependencies.removeWorkspace ?? removePaperTaskWorkspace
   const store = new Map<string, PaperTaskHandle>()
+  const taskEvents = new Map<string, AsyncIterable<PaperTaskEvent>>()
   const sourceStore = createPaperTaskSourceStore()
   const deleting = new Set<string>()
+  const deletionPending = new Set<string>()
+  const snapshots = new Map<string, StoredPaperTaskSnapshot>()
+  const previews = new Map<string, Map<PaperTaskBranch, PaperTaskPreviewSnapshot>>()
+
+  function snapshotFor(handle: PaperTaskHandle): StoredPaperTaskSnapshot {
+    const snapshot: StoredPaperTaskSnapshot = {
+      taskId: handle.taskId,
+      sourceTitle: handle.sourceTitle,
+      createdAt: handle.createdAt,
+      selection: handle.selection,
+      status: historyStatus(handle),
+      branches: { ...handle.branches },
+      cleanup: handle.cleanupFailed ? 'failed' : 'clean',
+      previews: [...(previews.get(handle.taskId)?.values() ?? [])],
+    }
+    return deletionPending.has(handle.taskId) ? { ...snapshot, deletionPending: true } : snapshot
+  }
+
+  function persist(handle: PaperTaskHandle): void {
+    const snapshot = snapshotFor(handle)
+    snapshots.set(handle.taskId, snapshot)
+    writePaperTaskIndex(projectRoot, [...snapshots.values()])
+  }
+
+  let recoveredRunningTask = false
+  for (const stored of readPaperTaskIndex(projectRoot)) {
+    const snapshot = restoredTaskSnapshot(stored)
+    recoveredRunningTask ||= snapshot !== stored
+    if (snapshot.deletionPending) deletionPending.add(snapshot.taskId)
+    const handle = makeHandle(
+      snapshot.taskId,
+      snapshot.selection,
+      join(projectRoot, 'project-local', snapshot.taskId),
+      join(projectRoot, 'runtime-local', snapshot.taskId),
+      snapshot.sourceTitle,
+      snapshot.createdAt,
+    )
+    handle.branches.translation = snapshot.branches.translation
+    handle.branches['deep-reading'] = snapshot.branches['deep-reading']
+    handle.cleanupFailed = snapshot.cleanup === 'failed'
+    handle.anyFailed = Object.values(snapshot.branches).includes('failed')
+    handle.outcome = outcomeForHistoryStatus(snapshot.status)
+    handle.finalized = true
+    handle.settle()
+    store.set(snapshot.taskId, handle)
+    snapshots.set(snapshot.taskId, snapshot)
+    previews.set(snapshot.taskId, new Map(snapshot.previews.map((preview) => [preview.branch, preview])))
+    sourceStore.restore(snapshot.taskId, handle.workspaceRoot)
+    taskEvents.set(snapshot.taskId, createRecoveredTaskEvents(snapshot))
+  }
+  if (recoveredRunningTask) writePaperTaskIndex(projectRoot, [...snapshots.values()])
 
   function workspaceRoot(taskId: string): string {
     return join(projectRoot, 'project-local', taskId)
@@ -105,13 +173,16 @@ export function createPaperTaskService(
 
   async function submit(
     input: PaperTaskPdfInput,
-    options: { readonly signal?: AbortSignal; readonly preparedSource?: PreparedPaperTaskSource } = {},
+    options: { readonly preparedSource?: PreparedPaperTaskSource; readonly sourceTitle?: string } = {},
   ): Promise<PaperTaskSubmitResult> {
     const selection = paperTaskSelectionSchema.safeParse(input.selection)
     if (!selection.success) {
       return { ok: false, statusCode: 400, message: SAFE_SELECTION_MESSAGE }
     }
     const taskId = createId()
+    if (store.has(taskId)) {
+      return { ok: false, statusCode: 409, message: '任务编号冲突，未覆盖已有任务；请稍后重试。' }
+    }
     const retainedRoot = workspaceRoot(taskId)
     const runtimeRoot = join(projectRoot, 'runtime-local', taskId)
     const provider = runtimeFactory === undefined ? getPaperTaskProviderSettings() : undefined
@@ -146,20 +217,48 @@ export function createPaperTaskService(
       return { ok: false, statusCode: 500, message: SAFE_CREATE_MESSAGE }
     }
 
-    const handle = makeHandle(taskId, selection.data, retainedRoot, runtimeRoot, options.signal)
+    previews.set(taskId, new Map())
+    let handle!: PaperTaskHandle
+    handle = makeHandle(
+      taskId,
+      selection.data,
+      retainedRoot,
+      runtimeRoot,
+      normalizeTaskTitle(options.sourceTitle),
+      new Date().toISOString(),
+      () => {
+        try { persist(handle) } catch { /* a failed snapshot must not strand an owned runtime */ }
+      },
+    )
     store.set(taskId, handle)
+    try {
+      persist(handle)
+    } catch {
+      store.delete(taskId)
+      snapshots.delete(taskId)
+      previews.delete(taskId)
+      try { removePaperTaskWorkspace(retainedRoot) } catch { /* keep the fixed submit error */ }
+      return { ok: false, statusCode: 500, message: SAFE_CREATE_MESSAGE }
+    }
+    const events = createTaskEvents(
+      handle,
+      input,
+      taskRuntimeFactory,
+      prepareSource,
+      sourceStore,
+      unavailableBranches,
+      options.preparedSource,
+      (event) => {
+        if (event.type !== 'preview') return
+        previews.get(taskId)?.set(event.branch, previewSnapshot(event))
+        try { persist(handle) } catch { /* preserve the task even if a later index write fails */ }
+      },
+    )
+    taskEvents.set(taskId, events)
     return {
       ok: true,
       taskId,
-      events: createTaskEvents(
-        handle,
-        input,
-        taskRuntimeFactory,
-        prepareSource,
-        sourceStore,
-        unavailableBranches,
-        options.preparedSource,
-      ),
+      events,
     }
   }
 
@@ -168,7 +267,7 @@ export function createPaperTaskService(
     if (handle === undefined) {
       return { ok: false, code: 'not-found' }
     }
-    requestStop(handle, 'cancel')
+    requestStop(handle)
     await waitSettled(handle)
     return handle.cleanupFailed
       ? { ok: false, code: 'cleanup-failed' }
@@ -181,22 +280,86 @@ export function createPaperTaskService(
       return { ok: false, code: 'not-found' }
     }
     deleting.add(taskId)
-    requestStop(handle, 'cancel')
+    if (!deletionPending.has(taskId)) {
+      const previousSnapshot = snapshots.get(taskId)
+      deletionPending.add(taskId)
+      try {
+        // The intent must reach the durable index before any runtime or task
+        // workspace cleanup can make this task impossible to recover.
+        persist(handle)
+      } catch {
+        deletionPending.delete(taskId)
+        if (previousSnapshot === undefined) snapshots.delete(taskId)
+        else snapshots.set(taskId, previousSnapshot)
+        deleting.delete(taskId)
+        return { ok: false, code: 'cleanup-failed' }
+      }
+    }
+    requestStop(handle)
     await waitSettled(handle)
     if (handle.cleanupFailed) {
+      await retryRuntimeCleanup(handle)
+      if (handle.cleanupFailed) {
+        deleting.delete(taskId)
+        return { ok: false, code: 'cleanup-failed' }
+      }
+    }
+    try {
+      // A service restored after a process interruption has no live runtime
+      // handles, but may still own a stale runtime-local task directory.
+      removePaperTaskWorkspace(handle.runtimeRoot)
+    } catch {
       deleting.delete(taskId)
       return { ok: false, code: 'cleanup-failed' }
     }
     try {
-      removePaperTaskWorkspace(handle.workspaceRoot)
+      // Keep the deletion tombstone indexed until the retained workspace is
+      // gone. If index commit then fails, an explicit retry can finish cleanup.
+      removeWorkspace(handle.workspaceRoot)
+    } catch {
+      deleting.delete(taskId)
+      return { ok: false, code: 'cleanup-failed' }
+    }
+    const nextSnapshots = [...snapshots.values()].filter((snapshot) => snapshot.taskId !== taskId)
+    try {
+      writePaperTaskIndex(projectRoot, nextSnapshots)
     } catch {
       deleting.delete(taskId)
       return { ok: false, code: 'cleanup-failed' }
     }
     store.delete(taskId)
+    taskEvents.delete(taskId)
+    snapshots.delete(taskId)
+    previews.delete(taskId)
+    deletionPending.delete(taskId)
     sourceStore.forget(taskId)
     deleting.delete(taskId)
     return { ok: true, code: 'deleted' }
+  }
+
+  function history(): readonly PaperTaskHistoryEntry[] {
+    return [...store.values()].reverse()
+      .filter((handle) => !deleting.has(handle.taskId))
+      .map((handle) => {
+        const fragments = readerView(handle)?.documents.flatMap((document) =>
+          document.status === 'fragment' ? [document.fragment] : [],
+        ) ?? []
+        return {
+          taskId: handle.taskId,
+          sourceTitle: handle.sourceTitle,
+          createdAt: handle.createdAt,
+          selection: handle.selection,
+          status: historyStatus(handle),
+          ...(deletionPending.has(handle.taskId) ? { deletionPending: true as const } : {}),
+          branches: { ...handle.branches },
+          ...(fragments.length === 0 ? {} : { fragments }),
+        }
+      })
+  }
+
+  function events(taskId: string): AsyncIterable<PaperTaskEvent> | undefined {
+    if (deleting.has(taskId)) return undefined
+    return taskEvents.get(taskId)
   }
 
   function source(taskId: string): StoredSource | undefined {
@@ -216,9 +379,18 @@ export function createPaperTaskService(
     if (deleting.has(taskId)) return undefined
     const handle = store.get(taskId)
     if (handle === undefined) return undefined
+    return readerView(handle)
+  }
+
+  function readerView(handle: PaperTaskHandle): PaperTaskReaderView | undefined {
+    const taskId = handle.taskId
     const stored = sourceStore.read(taskId, handle.workspaceRoot)
-    if (stored === undefined) return undefined
-    return readPaperTaskReader(taskId, handle.workspaceRoot, handle.branches, stored)
+    const quality: Partial<Record<PaperTaskBranch, PaperTaskQuality>> = {}
+    for (const preview of previews.get(taskId)?.values() ?? []) {
+      if (preview.quality !== undefined) quality[preview.branch] = preview.quality
+    }
+    const metadata: PaperTaskReaderPreviewMetadata = { quality, taskOutcome: handle.outcome }
+    return readPaperTaskReader(taskId, handle.workspaceRoot, handle.branches, stored, metadata)
   }
 
   function artifactContext(taskId: string, branch: PaperTaskBranch): {
@@ -234,7 +406,7 @@ export function createPaperTaskService(
     if (stored === undefined) return undefined
     const view = readPaperTaskReader(taskId, handle.workspaceRoot, handle.branches, stored)
     const document = view?.documents.find((candidate) => candidate.branch === branch)
-    if (document === undefined) return undefined
+    if (document === undefined || document.status === 'fragment') return undefined
     const masterQuality = paperTaskDocumentQuality(paperTaskBranchQuality(handle.branches[branch]), document.status)
     const assets = document.assets.map((asset): PaperTaskExportAsset => {
       const bytes = asset.availability === 'available'
@@ -305,6 +477,8 @@ export function createPaperTaskService(
     if (deleting.has(taskId)) return undefined
     const handle = store.get(taskId)
     if (handle === undefined || handle.branches.translation !== 'complete') return undefined
+    const document = reader(taskId)?.documents.find((candidate) => candidate.branch === 'translation')
+    if (document?.status !== 'complete' || !document.formats.pdf.finalAvailable) return undefined
     return readPaperTaskTranslatedPdf(handle.workspaceRoot, 'complete')
   }
 
@@ -321,20 +495,43 @@ export function createPaperTaskService(
     return correctPaperTaskSource(sourceStore, taskId, handle.workspaceRoot, correction)
   }
 
-  return { submit, cancel, remove, source, translation, reader, buildArtifacts, artifact, inspectArtifact, originalPdf, translatedPdf, asset, correctSource }
+  return { submit, cancel, remove, history, events, source, translation, reader, buildArtifacts, artifact, inspectArtifact, originalPdf, translatedPdf, asset, correctSource }
 }
 
-/**
- * Await the stream's settlement when it actually started. A stream created but
- * never consumed (e.g. the SSE writer failed before its first pull) never
- * settles; in that case stop the task inline so cancel/remove cannot hang.
- */
 async function waitSettled(handle: PaperTaskHandle): Promise<void> {
-  if (!handle.started) {
-    await finalizeHandle(handle)
+  if (handle.execution !== undefined) {
+    await handle.execution
     return
   }
   await handle.settled
+}
+
+async function retryRuntimeCleanup(handle: PaperTaskHandle): Promise<void> {
+  const failedRuntimes = [...handle.runtimeCleanupFailures]
+  handle.cleanupFailed = false
+  for (const runtime of failedRuntimes) handle.runtimeClosures.delete(runtime)
+  await Promise.all(failedRuntimes.map((runtime) => closeRuntime(handle, runtime)))
+  if (handle.cleanupFailed) return
+  try {
+    removePaperTaskWorkspace(handle.runtimeRoot)
+  } catch {
+    handle.cleanupFailed = true
+  }
+}
+
+function historyStatus(handle: PaperTaskHandle): PaperTaskHistoryEntry['status'] {
+  switch (handle.outcome) {
+    case 'succeeded': return 'success'
+    case 'failed': return 'fail'
+    case 'cancelled': return 'stopped'
+    case 'interrupted': return 'interrupted'
+    default: return 'running'
+  }
+}
+
+function normalizeTaskTitle(title?: string): string {
+  const normalized = title?.replace(/[\u0000-\u001f\u007f]/gu, '').trim().slice(0, 200)
+  return normalized === undefined || normalized.length === 0 ? '上传的论文 PDF' : normalized
 }
 
 async function defaultPrepareSource(

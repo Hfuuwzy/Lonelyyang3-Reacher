@@ -13,10 +13,8 @@
   --wagashi: #ead8ad;
   --rule: rgba(42, 12, 0, 0.34);
   --nav-paper: rgba(250, 248, 242, 0.97);
-  --rail-width: 80px;
-  --rail-width-tablet: 64px;
-  --rail-width-mobile: 56px;
-  --right-rail-width-desktop: 80px;
+  --nav-paper-texture-blend-mode: normal;
+  --right-rail-width-desktop: clamp(80px, 4.166667vw, 106.666667px);
   --right-rail-width-tablet: 64px;
   --right-rail-width-mobile: 56px;
   --right-drawer-width-desktop: min(690px, calc(100vw - var(--right-rail-width-desktop)));
@@ -101,6 +99,7 @@
   --wagashi: #564b35;
   --rule: rgba(242, 234, 219, 0.34);
   --nav-paper: rgba(23, 27, 34, 0.97);
+  --nav-paper-texture-blend-mode: multiply;
   --home-brand-theme-invert: 1;
   --home-brand-theme-hue: 180deg;
   --color-bg: var(--paper);

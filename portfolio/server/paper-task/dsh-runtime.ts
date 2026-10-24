@@ -98,8 +98,13 @@ class DshPaperTaskRuntime implements PaperTaskRuntime {
   }
 
   close(): Promise<PaperTaskCloseResult> {
-    this.closePromise ??= this.dispose()
-    return this.closePromise
+    if (this.closePromise !== undefined) return this.closePromise
+    const attempt = this.dispose()
+    this.closePromise = attempt
+    void attempt.then((result) => {
+      if (!result.ok && this.closePromise === attempt) this.closePromise = undefined
+    })
+    return attempt
   }
 
   private async run(signal?: AbortSignal): Promise<readonly PaperTaskRuntimeEvent[]> {

@@ -155,10 +155,10 @@ const props = defineProps<{ readonly taskId: string; readonly document: PaperTas
 const emit = defineEmits<{ readonly updated: [view: PaperTaskReaderView] }>()
 
 const labels: Record<PaperTaskExportFormat, string> = {
-  markdown: 'Markdown 主稿', assets: '受控原图资产', pdf: '译文 PDF',
+  markdown: 'Markdown 主稿', assets: '受控原图资产', pdf: '译文 PDF（检查与最终）',
 }
 const buildLabels: Record<PaperTaskExportFormat, string> = {
-  markdown: '构建 Markdown', assets: '整理资产包', pdf: '构建 PDF',
+  markdown: '构建 Markdown', assets: '整理资产包', pdf: '生成逐页检查副本',
 }
 const visibleFormats = computed(() => props.document.branch === 'translation'
   ? PAPER_TASK_EXPORT_FORMATS

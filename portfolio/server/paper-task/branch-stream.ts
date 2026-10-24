@@ -34,6 +34,8 @@ export async function runPaperTaskBranch(run: PaperTaskBranchRun): Promise<void>
         state = event.quality.status === 'complete'
           ? 'complete'
           : event.quality.status === 'needs-confirmation' ? 'needs-confirmation' : 'preview-ready'
+        handle.branches[branch] = state
+        handle.onChange()
         queue.push({
           kind: 'event',
           event: {
@@ -49,6 +51,8 @@ export async function runPaperTaskBranch(run: PaperTaskBranchRun): Promise<void>
           saveDraftPiece(handle.workspaceRoot, branch, { id: piece.id, dependencies: piece.dependencies, stale: false })
         }
         sawPreview = true
+        handle.branches[branch] = 'sample-ready'
+        handle.onChange()
         queue.push({ kind: 'event', event: { type: 'preview', taskId: handle.taskId, branch, designation: 'sample', paragraphs: [...event.paragraphs] } })
       }
     }
@@ -61,6 +65,7 @@ export async function runPaperTaskBranch(run: PaperTaskBranchRun): Promise<void>
   } finally {
     if (ok) handle.branches[branch] = state
     else if (!handle.controller.signal.aborted) handle.branches[branch] = 'failed'
+    handle.onChange()
     void closeRuntime(handle, runtime)
     queue.push({ kind: 'done', branch, ok, state })
   }

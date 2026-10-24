@@ -1,7 +1,25 @@
 .category-landing {
+  --category-landing-column-width: 960px;
+
   position: relative;
   display: grid;
+  inline-size: calc(100% + var(--site-rail-width));
+  grid-template-columns:
+    minmax(0, 1fr)
+    minmax(0, min(var(--category-landing-column-width), calc(100% - var(--site-axis-gutter) - var(--site-axis-gutter))))
+    minmax(0, 1fr);
+  padding-block: 64px 96px;
+}
+
+.category-landing--feature-list {
+  --category-landing-column-width: 1120px;
+}
+
+.category-landing__inner {
+  display: grid;
+  grid-column: 2;
   gap: 48px;
+  min-inline-size: 0;
 }
 
 .category-landing__list {
@@ -33,6 +51,10 @@
 
 @media (max-width: 767px) {
   .category-landing {
+    padding-block: 32px 80px;
+  }
+
+  .category-landing__inner {
     gap: 32px;
   }
 }

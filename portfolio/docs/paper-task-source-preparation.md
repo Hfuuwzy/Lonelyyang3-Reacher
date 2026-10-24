@@ -1,6 +1,6 @@
 # Paper-task source preparation
 
-This guide describes the local PDF source preparation and correction available on the prototype paper-task route. Text generation previews are documented separately in [Paper-task text generation](paper-task-generation.md).
+This guide describes the local PDF source preparation and correction used by the formal paper-task workbench. Its development-only API remains protected as documented below. Text generation previews are documented separately in [Paper-task text generation](paper-task-generation.md).
 
 ## Current behavior
 
@@ -46,7 +46,8 @@ A successful change returns 200 and advances the global revision. A stale revisi
 
 ## Retention, isolation, and limits
 
-- Retained project-local task files remain until manual task deletion. There is no TTL, task history, recovery after server restart, correction history, provenance manifest, or human-original intermediate.
+- Retained project-local task files and the bounded task-history index remain until explicit task deletion; new tasks do not expire or clean up older workspaces. Starting a new service instance restores task history and the source-store map from retained task data. Tasks that were still running at restart are marked interrupted and are never resumed or retried automatically.
+- Restored tasks keep the original PDF, shared prepared source and assets, branch masters/previews, quality state, and PDF inspection gates. Reading or downloading existing results does not require provider settings. Provider credentials remain process-memory-only and are not part of the task index or workspace.
 - Branch runtimes read shared source material and write only their own branch workspace through controlled task tools. The fixed DSH composition omits shell tools; this is not a hostile-code sandbox for the trusted local Harness process.
 - Extraction relies on selectable PDF text and layout heuristics. The text-generation preview does not promise full-paper translation, a complete deep-reading report, export, or visual model understanding. A controlled real-provider text run is recorded in the generation guide; real PDF/image endpoint acceptance and subsequent quality work remain outstanding.
 

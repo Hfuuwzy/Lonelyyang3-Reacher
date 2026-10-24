@@ -98,6 +98,7 @@ const STATE_LABELS: Record<PaperTaskState, string> = {
   complete: '完整成品',
   failed: '失败',
   cancelled: '已取消',
+  interrupted: '服务中断',
 }
 
 const QUALITY_OPTION_LABELS: Record<PaperTaskQualityOption, string> = {
@@ -110,14 +111,14 @@ const OUTCOME_TITLES: Record<PaperTaskOutcome, string> = {
   succeeded: '样例任务结束',
   failed: '任务失败',
   cancelled: '任务已停止',
-  disconnected: '连接中断',
+  interrupted: '服务中断，任务未续跑',
 }
 
 const OUTCOME_SUMMARIES: Record<PaperTaskOutcome, string> = {
   succeeded: '所选分支均有可读预览。样例或文本预览均未完成且未经质量检查，不代表成品、内容完整或质量通过。',
   failed: '部分分支失败；未选择的分支不受影响。其余分支的预览与已保存资料保留在任务工作区中。失败原因见开发服务器控制台的 [paper-task] 日志或任务资料的 runtime-error.json。',
   cancelled: '任务已停止，未完成的分支标为已取消。已收到的样例、预览与已保存资料保留在任务工作区中。',
-  disconnected: '连接中断，未完成的分支标为已取消。已收到的样例、预览与已保存资料保留在任务工作区中。',
+  interrupted: '服务重启时任务尚未完成；仅恢复已保存的资料与成果，不会自动继续、重试或调用模型。',
 }
 
 function previewQualityPresentation(
@@ -191,7 +192,7 @@ export function createPaperTaskWorkbenchState(): PaperTaskWorkbenchStateControll
       }
       case 'failed':
       case 'cancelled':
-      case 'disconnected':
+      case 'interrupted':
         return OUTCOME_TITLES[current.outcome]
       default: {
         const exhaustive: never = current.outcome

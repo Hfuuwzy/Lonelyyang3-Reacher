@@ -7,7 +7,6 @@ import {
   sendIterable,
   setResponseHeaders,
 } from 'h3'
-import type { PaperTaskEvent } from '../../../app/utils/paper-task-contract'
 import { consumeAttestedDevPeer } from '../../utils/paper-review/dev-peer'
 import { checkContentLength, checkPaperReviewAccess } from '../../utils/paper-review/gate'
 import { observeRequestDisconnect } from '../../utils/paper-review/disconnect'
@@ -18,6 +17,7 @@ import {
   type PreparedPaperTaskSource,
 } from '../../paper-task/source-acquisition'
 import { paperTaskService } from '../../paper-task/instance'
+import { renderPaperTaskSse } from '../../paper-task/sse'
 
 /**
  * Development-only paper-task submission endpoint (issue #40).
@@ -79,22 +79,36 @@ export default defineEventHandler(async (event) => {
       'cache-control': 'no-store, no-cache',
     })
 
-    const submissionOptions = preparedSource === undefined
-      ? { signal: disconnect.signal }
-      : { signal: disconnect.signal, preparedSource }
+    const submissionOptions = parsed.input.sourceUrl === null
+      ? {
+          sourceTitle: uploadedPdfTitle(parts),
+          ...(preparedSource === undefined ? {} : { preparedSource }),
+        }
+      : {
+          sourceTitle: sourceLinkTitle(parsed.input.sourceUrl),
+          ...(preparedSource === undefined ? {} : { preparedSource }),
+        }
     const submission = await paperTaskService().submit(taskInput, submissionOptions)
     if (!submission.ok) {
       throw createError({ statusCode: submission.statusCode, message: submission.message })
     }
-    await sendIterable(event, renderSse(submission.events))
+    await sendIterable(event, renderPaperTaskSse(submission.events))
   } finally {
     disconnect.dispose()
   }
 })
 
-/** Map each stream event to one blank-line-delimited SSE chunk. */
-async function* renderSse(events: AsyncIterable<PaperTaskEvent>): AsyncGenerator<string> {
-  for await (const event of events) {
-    yield `data: ${JSON.stringify(event)}\n\n`
+function uploadedPdfTitle(parts: readonly { readonly name?: string; readonly filename?: string }[]): string {
+  const filename = parts.find((part) => part.name === 'pdf')?.filename
+  if (filename === undefined || filename.trim() === '') return '上传的论文 PDF'
+  return filename.replace(/\\/gu, '/').split('/').at(-1) ?? '上传的论文 PDF'
+}
+
+function sourceLinkTitle(sourceUrl: string): string {
+  try {
+    const url = new URL(sourceUrl)
+    return `${url.hostname}${url.pathname}`.slice(0, 200)
+  } catch {
+    return '链接论文'
   }
 }

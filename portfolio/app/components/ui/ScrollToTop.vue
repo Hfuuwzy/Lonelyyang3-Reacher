@@ -43,7 +43,7 @@ onUnmounted(() => {
   position: fixed;
   z-index: 55;
   inset-block-end: 24px;
-  inset-inline-end: calc(var(--rail-width) + 24px);
+  inset-inline-end: calc(var(--right-rail-width-desktop) + 24px);
   display: grid;
   inline-size: 48px;
   block-size: 48px;
@@ -83,13 +83,13 @@ onUnmounted(() => {
 
 @media (width < 1024px) {
   .scroll-to-top {
-    inset-inline-end: calc(var(--rail-width-tablet) + 24px);
+    inset-inline-end: calc(var(--right-rail-width-tablet) + 24px);
   }
 }
 
 @media (width < 768px) {
   .scroll-to-top {
-    inset-inline-end: calc(var(--rail-width-mobile) + 16px);
+    inset-inline-end: calc(var(--right-rail-width-mobile) + 16px);
   }
 }
 

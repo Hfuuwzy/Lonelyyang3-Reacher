@@ -247,6 +247,8 @@ Tailwind 可用于基础工具类，但当前视觉系统以 CSS variables 和 s
 | Life | `/life` | `/ja/life` |
 | Notes | `/notes` | `/ja/notes` |
 | About | `/about` | `/ja/about` |
+| Paper task workbench | `/agents/paper` | `/ja/agents/paper` |
+| Paper task settings | `/agents/paper/settings` | `/ja/agents/paper/settings` |
 
 ## 14. 测试架构
 

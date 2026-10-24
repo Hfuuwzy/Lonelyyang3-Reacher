@@ -37,6 +37,7 @@ const PROOF_HEX_RE = /^[0-9a-f]{64}$/
 /** An exact paper-task UUID route segment (lowercase hex UUID v4 shape). */
 const PAPER_TASK_CANCEL_PATH_RE = /^\/api\/prototype\/paper-task\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/cancel$/
 const PAPER_TASK_ID_PATH_RE = /^\/api\/prototype\/paper-task\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/
+const PAPER_TASK_EVENTS_PATH_RE = /^\/api\/prototype\/paper-task\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/events$/
 const PAPER_TASK_SOURCE_PATH_RE = /^\/api\/prototype\/paper-task\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/source$/
 const PAPER_TASK_TRANSLATION_PATH_RE = /^\/api\/prototype\/paper-task\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/translation$/
 const PAPER_TASK_READER_PATH_RE = /^\/api\/prototype\/paper-task\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/reader$/
@@ -45,9 +46,9 @@ const PAPER_TASK_ASSET_PATH_RE = /^\/api\/prototype\/paper-task\/[0-9a-f]{8}-[0-
 const PAPER_TASK_SETTINGS_PATH = '/api/prototype/paper-task-settings'
 
 /**
- * Exact routes the parent attests. Only the known POST submissions and the
- * UUID-shaped cancel/delete paths are signed; any other method or path falls
- * through unattested so the worker gate denies it.
+ * Exact routes the parent attests. Only the known submission, history, and
+ * UUID-shaped task paths are signed; any other method or path falls through
+ * unattested so the worker gate denies it.
  */
 function isAttestedRoute(method: string, pathname: string): boolean {
   if (method === 'POST' && pathname === '/api/prototype/paper-review') {
@@ -56,7 +57,13 @@ function isAttestedRoute(method: string, pathname: string): boolean {
   if (method === 'POST' && pathname === '/api/prototype/paper-task') {
     return true
   }
+  if (method === 'GET' && pathname === '/api/prototype/paper-task') {
+    return true
+  }
   if (method === 'POST' && PAPER_TASK_CANCEL_PATH_RE.test(pathname)) {
+    return true
+  }
+  if (method === 'GET' && PAPER_TASK_EVENTS_PATH_RE.test(pathname)) {
     return true
   }
   if (method === 'DELETE' && PAPER_TASK_ID_PATH_RE.test(pathname)) {

@@ -1,29 +1,35 @@
 <template>
-  <section :data-testid="`category-landing-${navKey}`" class="category-landing">
-    <PaperSectionHeading
-      :stamp="headingStamp"
-      :english="navItem.englishLabel"
-      :title="localizedTitle"
-      :description="localizedDescription"
-    />
-
-    <div v-if="articleItems.length === 0" :data-testid="`category-empty-${navKey}`" class="category-landing__empty">
-      <PatternDecoration variant="checker" />
-      <p>{{ emptyMessage }}</p>
-    </div>
-
-    <div
-      v-else
-      :data-testid="`category-list-${navKey}`"
-      class="category-landing__list"
-      :class="`category-landing__list--${layout}`"
-    >
-      <ArticleRow
-        v-for="item in articleItems"
-        :key="item.path"
-        :post="item"
-        :emphasis="layout === 'feature-list'"
+  <section
+    :data-testid="`category-landing-${navKey}`"
+    class="category-landing"
+    :class="`category-landing--${layout}`"
+  >
+    <div class="category-landing__inner">
+      <PaperSectionHeading
+        :stamp="headingStamp"
+        :english="navItem.englishLabel"
+        :title="localizedTitle"
+        :description="localizedDescription"
       />
+
+      <div v-if="articleItems.length === 0" :data-testid="`category-empty-${navKey}`" class="category-landing__empty">
+        <PatternDecoration variant="checker" />
+        <p>{{ emptyMessage }}</p>
+      </div>
+
+      <div
+        v-else
+        :data-testid="`category-list-${navKey}`"
+        class="category-landing__list"
+        :class="`category-landing__list--${layout}`"
+      >
+        <ArticleRow
+          v-for="item in articleItems"
+          :key="item.path"
+          :post="item"
+          :emphasis="layout === 'feature-list'"
+        />
+      </div>
     </div>
   </section>
 </template>

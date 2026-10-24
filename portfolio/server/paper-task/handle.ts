@@ -3,11 +3,11 @@
  * (issue #40).
  *
  * A handle owns the stop controller, branch states, and the retained workspace
- * and ephemeral runtime roots. Handles exist only while a task is current —
- * there is no history, list, replay, or recovery.
+ * and ephemeral runtime roots. The process-local service retains the handle
+ * and its history until the task is explicitly removed or the process exits.
  */
 
-import type { PaperTaskBranches, PaperTaskSelection } from '../../app/utils/paper-task-contract'
+import type { PaperTaskBranches, PaperTaskOutcome, PaperTaskSelection } from '../../app/utils/paper-task-contract'
 import { getSelectedBranches } from '../../app/utils/paper-task-contract'
 import type { PaperTaskRuntime } from './runtime'
 import { rmdirSync } from 'node:fs'
@@ -15,18 +15,21 @@ import { rmdirSync } from 'node:fs'
 export interface PaperTaskHandle {
   readonly taskId: string
   readonly selection: PaperTaskSelection
+  readonly sourceTitle: string
+  readonly createdAt: string
   readonly workspaceRoot: string
   readonly runtimeRoot: string
+  readonly onChange: () => void
   readonly branches: PaperTaskBranches
   readonly controller: AbortController
   readonly runtimes: Map<string, PaperTaskRuntime>
   readonly runtimeClosures: Map<PaperTaskRuntime, Promise<void>>
-  stopReason: 'cancel' | 'disconnect' | undefined
+  readonly runtimeCleanupFailures: Set<PaperTaskRuntime>
   anyFailed: boolean
+  outcome: PaperTaskOutcome | undefined
   cleanupFailed: boolean
   finalized: boolean
-  /** True once the event stream starts executing; controls cancel/remove waits. */
-  started: boolean
+  execution: Promise<void> | undefined
   settled: Promise<void>
   settle: () => void
   finalizer: Promise<void> | undefined
@@ -37,7 +40,9 @@ export function makeHandle(
   selection: PaperTaskSelection,
   workspaceRoot: string,
   runtimeRoot: string,
-  requestSignal: AbortSignal | undefined,
+  sourceTitle: string,
+  createdAt: string,
+  onChange: () => void = () => undefined,
 ): PaperTaskHandle {
   let settle = (): void => undefined
   const settled = new Promise<void>((resolveSettle) => {
@@ -53,32 +58,28 @@ export function makeHandle(
     selection,
     workspaceRoot,
     runtimeRoot,
+    sourceTitle,
+    createdAt,
+    onChange,
     branches,
     controller,
     runtimes: new Map(),
     runtimeClosures: new Map(),
-    stopReason: undefined,
+    runtimeCleanupFailures: new Set(),
     anyFailed: false,
+    outcome: undefined,
     cleanupFailed: false,
     finalized: false,
-    started: false,
+    execution: undefined,
     settled,
     settle,
     finalizer: undefined,
   }
-  if (requestSignal !== undefined) {
-    if (requestSignal.aborted) {
-      requestStop(handle, 'disconnect')
-    } else {
-      requestSignal.addEventListener('abort', () => requestStop(handle, 'disconnect'), { once: true })
-    }
-  }
   return handle
 }
 
-export function requestStop(handle: PaperTaskHandle, reason: 'cancel' | 'disconnect'): void {
+export function requestStop(handle: PaperTaskHandle): void {
   if (!handle.controller.signal.aborted) {
-    handle.stopReason = reason
     handle.controller.abort()
   }
 }
@@ -94,9 +95,13 @@ export function closeRuntime(handle: PaperTaskHandle, runtime: PaperTaskRuntime)
       try {
         if (!(await runtime.close()).ok) {
           handle.cleanupFailed = true
+          handle.runtimeCleanupFailures.add(runtime)
+        } else {
+          handle.runtimeCleanupFailures.delete(runtime)
         }
       } catch {
         handle.cleanupFailed = true
+        handle.runtimeCleanupFailures.add(runtime)
       }
     })()
     handle.runtimeClosures.set(runtime, closing)
@@ -122,10 +127,6 @@ export function finalizeHandle(handle: PaperTaskHandle, runners: readonly Promis
     }
   })()
   return handle.finalizer
-}
-
-export function stopOutcome(handle: PaperTaskHandle): 'cancelled' | 'disconnected' {
-  return handle.stopReason === 'disconnect' ? 'disconnected' : 'cancelled'
 }
 
 export function cleanupStatus(handle: PaperTaskHandle): 'clean' | 'failed' {
